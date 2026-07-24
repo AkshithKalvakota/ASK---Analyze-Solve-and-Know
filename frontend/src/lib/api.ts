@@ -46,6 +46,15 @@ export interface Dataset {
   project_id: string
   filename: string
   content_type: string
+  profile_result?: {
+    dtypes: Record<string, string>
+    quality_score: number
+    n_rows: number
+    n_columns: number
+    [key: string]: any
+  }
+  target_column?: string | null
+  problem_type?: string | null
   created_at: string
 }
 
@@ -65,5 +74,18 @@ export async function fetchDatasets(projectId: string): Promise<Dataset[]> {
 
 export async function profileDataset(projectId: string, datasetId: string): Promise<Dataset> {
   const res = await api.post(`/projects/${projectId}/datasets/${datasetId}/profile`)
+  return res.data
+}
+
+export async function setTargetColumn(
+  projectId: string,
+  datasetId: string,
+  targetColumn: string,
+  problemTypeOverride?: string
+): Promise<Dataset> {
+  const res = await api.post(`/projects/${projectId}/datasets/${datasetId}/target`, {
+    target_column: targetColumn,
+    problem_type_override: problemTypeOverride ?? null,
+  })
   return res.data
 }

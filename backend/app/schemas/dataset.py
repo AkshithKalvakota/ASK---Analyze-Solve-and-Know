@@ -9,6 +9,8 @@ class DatasetOut(BaseModel):
     filename: str
     content_type: str
     profile_result: Optional[dict[str, Any]] = None
+    target_column: Optional[str] = None
+    problem_type: Optional[str] = None
     created_at: datetime
 
     class Config:

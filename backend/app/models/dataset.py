@@ -12,4 +12,6 @@ class Dataset(Base):
     storage_key = Column(String, nullable=False)
     content_type = Column(String, nullable=False)
     profile_result = Column(JSONB, nullable=True)
+    target_column = Column(String, nullable=True)
+    problem_type = Column(String, nullable=True)  # "classification" or "regression"
     created_at = Column(DateTime(timezone=True), server_default=func.now())

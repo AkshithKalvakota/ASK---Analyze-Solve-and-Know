@@ -9,6 +9,7 @@ import {
   uploadDataset,
   fetchDatasets,
   profileDataset,
+  setTargetColumn,
 } from '../lib/api'
 
 function ProjectDatasets({ projectId }: { projectId: string }) {
@@ -28,6 +29,14 @@ function ProjectDatasets({ projectId }: { projectId: string }) {
 
   const profileMutation = useMutation({
     mutationFn: (datasetId: string) => profileDataset(projectId, datasetId),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['datasets', projectId] })
+    },
+  })
+
+  const targetMutation = useMutation({
+    mutationFn: ({ datasetId, column }: { datasetId: string; column: string }) =>
+      setTargetColumn(projectId, datasetId, column),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['datasets', projectId] })
     },
@@ -63,7 +72,7 @@ function ProjectDatasets({ projectId }: { projectId: string }) {
       {isLoading && <p className="text-gray-500 text-sm mt-2">Loading datasets...</p>}
 
       {datasets && datasets.length > 0 && (
-        <ul className="mt-2 space-y-2">
+        <ul className="mt-2 space-y-3">
           {datasets.map((d) => (
             <li key={d.id} className="text-sm text-gray-400">
               <div className="flex items-center justify-between">
@@ -76,10 +85,32 @@ function ProjectDatasets({ projectId }: { projectId: string }) {
                   {profileMutation.isPending ? 'Profiling...' : 'Profile'}
                 </button>
               </div>
+
               {d.profile_result && (
-                <pre className="mt-1 text-xs bg-gray-950 p-2 rounded overflow-x-auto">
-                  {JSON.stringify(d.profile_result, null, 2)}
-                </pre>
+                <div className="mt-2 flex items-center gap-2">
+                  <label className="text-xs">Predict:</label>
+                  <select
+                    value={d.target_column ?? ''}
+                    onChange={(e) =>
+                      targetMutation.mutate({ datasetId: d.id, column: e.target.value })
+                    }
+                    className="bg-gray-800 border border-gray-700 rounded px-2 py-1 text-xs"
+                  >
+                    <option value="" disabled>
+                      Select column
+                    </option>
+                    {Object.keys(d.profile_result.dtypes).map((col) => (
+                      <option key={col} value={col}>
+                        {col}
+                      </option>
+                    ))}
+                  </select>
+                  {d.problem_type && (
+                    <span className="text-xs bg-purple-900 text-purple-200 px-2 py-1 rounded">
+                      Detected: {d.problem_type}
+                    </span>
+                  )}
+                </div>
               )}
             </li>
           ))}

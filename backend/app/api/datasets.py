@@ -13,6 +13,7 @@ from app.services.profiling import load_dataframe, profile_dataset
 
 router = APIRouter(prefix="/projects/{project_id}/datasets", tags=["datasets"])
 
+
 def get_db():
     db = SessionLocal()
     try:
@@ -25,6 +26,47 @@ ALLOWED_TYPES = {
     "application/vnd.ms-excel",
     "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
 }
+
+from pydantic import BaseModel
+from app.services.target_detection import detect_problem_type
+
+class TargetSelection(BaseModel):
+    target_column: str
+    problem_type_override: str | None = None  # "classification" or "regression", optional
+
+@router.post("/{dataset_id}/target", response_model=DatasetOut)
+def set_target_column(
+    project_id: UUID,
+    dataset_id: UUID,
+    payload: TargetSelection,
+    db: Session = Depends(get_db),
+    user_id: str = Depends(get_current_user_id),
+):
+    stmt = select(Project).where(Project.id == project_id, Project.user_id == user_id)
+    project = db.execute(stmt).scalar_one_or_none()
+    if not project:
+        raise HTTPException(status_code=404, detail="Project not found")
+
+    stmt = select(Dataset).where(Dataset.id == dataset_id, Dataset.project_id == project_id)
+    dataset = db.execute(stmt).scalar_one_or_none()
+    if not dataset:
+        raise HTTPException(status_code=404, detail="Dataset not found")
+
+    if payload.target_column not in dataset.profile_result.get("dtypes", {}):
+        raise HTTPException(status_code=400, detail="Column not found in dataset")
+
+    if payload.problem_type_override:
+        problem_type = payload.problem_type_override
+    else:
+        file_bytes = download_file(dataset.storage_key)
+        df = load_dataframe(file_bytes, dataset.content_type)
+        problem_type = detect_problem_type(df, payload.target_column)
+
+    dataset.target_column = payload.target_column
+    dataset.problem_type = problem_type
+    db.commit()
+    db.refresh(dataset)
+    return dataset
 
 @router.post("", response_model=DatasetOut)
 async def upload_dataset(
