@@ -1,7 +1,10 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-app = FastAPI(title="AI Data Analyst")
+app = FastAPI(title="ASK - Analyze, Solve and Know")
+from app.api.projects import router as projects_router
+
+app.include_router(projects_router)
 
 app.add_middleware(
     CORSMiddleware,
