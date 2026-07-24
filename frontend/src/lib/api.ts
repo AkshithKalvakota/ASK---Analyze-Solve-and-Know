@@ -62,3 +62,8 @@ export async function fetchDatasets(projectId: string): Promise<Dataset[]> {
   const res = await api.get(`/projects/${projectId}/datasets`)
   return res.data
 }
+
+export async function profileDataset(projectId: string, datasetId: string): Promise<Dataset> {
+  const res = await api.post(`/projects/${projectId}/datasets/${datasetId}/profile`)
+  return res.data
+}

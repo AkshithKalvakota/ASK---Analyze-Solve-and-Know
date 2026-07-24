@@ -8,7 +8,8 @@ from app.models.dataset import Dataset
 from app.models.project import Project
 from app.schemas.dataset import DatasetOut
 from app.api.deps import get_current_user_id
-from app.services.storage import upload_file
+from app.services.storage import upload_file, download_file
+from app.services.profiling import load_dataframe, profile_dataset
 
 router = APIRouter(prefix="/projects/{project_id}/datasets", tags=["datasets"])
 
@@ -32,7 +33,6 @@ async def upload_dataset(
     db: Session = Depends(get_db),
     user_id: str = Depends(get_current_user_id),
 ):
-    # Confirm the project exists and belongs to this user
     stmt = select(Project).where(Project.id == project_id, Project.user_id == user_id)
     project = db.execute(stmt).scalar_one_or_none()
     if not project:
@@ -69,3 +69,29 @@ def list_datasets(
 
     stmt = select(Dataset).where(Dataset.project_id == project_id)
     return db.execute(stmt).scalars().all()
+
+@router.post("/{dataset_id}/profile", response_model=DatasetOut)
+def profile_dataset_endpoint(
+    project_id: UUID,
+    dataset_id: UUID,
+    db: Session = Depends(get_db),
+    user_id: str = Depends(get_current_user_id),
+):
+    stmt = select(Project).where(Project.id == project_id, Project.user_id == user_id)
+    project = db.execute(stmt).scalar_one_or_none()
+    if not project:
+        raise HTTPException(status_code=404, detail="Project not found")
+
+    stmt = select(Dataset).where(Dataset.id == dataset_id, Dataset.project_id == project_id)
+    dataset = db.execute(stmt).scalar_one_or_none()
+    if not dataset:
+        raise HTTPException(status_code=404, detail="Dataset not found")
+
+    file_bytes = download_file(dataset.storage_key)
+    df = load_dataframe(file_bytes, dataset.content_type)
+    result = profile_dataset(df)
+
+    dataset.profile_result = result
+    db.commit()
+    db.refresh(dataset)
+    return dataset

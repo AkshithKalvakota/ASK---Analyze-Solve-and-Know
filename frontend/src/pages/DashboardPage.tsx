@@ -8,6 +8,7 @@ import {
   deleteProject,
   uploadDataset,
   fetchDatasets,
+  profileDataset,
 } from '../lib/api'
 
 function ProjectDatasets({ projectId }: { projectId: string }) {
@@ -25,12 +26,19 @@ function ProjectDatasets({ projectId }: { projectId: string }) {
     },
   })
 
+  const profileMutation = useMutation({
+    mutationFn: (datasetId: string) => profileDataset(projectId, datasetId),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['datasets', projectId] })
+    },
+  })
+
   function handleFileChange(e: React.ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0]
     if (file) {
       uploadMutation.mutate(file)
     }
-    e.target.value = '' // reset so the same file can be re-selected if needed
+    e.target.value = ''
   }
 
   return (
@@ -55,10 +63,24 @@ function ProjectDatasets({ projectId }: { projectId: string }) {
       {isLoading && <p className="text-gray-500 text-sm mt-2">Loading datasets...</p>}
 
       {datasets && datasets.length > 0 && (
-        <ul className="mt-2 space-y-1">
+        <ul className="mt-2 space-y-2">
           {datasets.map((d) => (
             <li key={d.id} className="text-sm text-gray-400">
-              📄 {d.filename}
+              <div className="flex items-center justify-between">
+                <span>📄 {d.filename}</span>
+                <button
+                  onClick={() => profileMutation.mutate(d.id)}
+                  disabled={profileMutation.isPending}
+                  className="text-xs bg-gray-800 hover:bg-gray-700 px-2 py-1 rounded"
+                >
+                  {profileMutation.isPending ? 'Profiling...' : 'Profile'}
+                </button>
+              </div>
+              {d.profile_result && (
+                <pre className="mt-1 text-xs bg-gray-950 p-2 rounded overflow-x-auto">
+                  {JSON.stringify(d.profile_result, null, 2)}
+                </pre>
+              )}
             </li>
           ))}
         </ul>

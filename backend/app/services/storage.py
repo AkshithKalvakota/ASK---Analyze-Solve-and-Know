@@ -30,3 +30,7 @@ def get_download_url(key: str, expires_in: int = 3600) -> str:
         Params={"Bucket": settings.b2_bucket_name, "Key": key},
         ExpiresIn=expires_in,
     )
+
+def download_file(key: str) -> bytes:
+    response = s3_client.get_object(Bucket=settings.b2_bucket_name, Key=key)
+    return response["Body"].read()
