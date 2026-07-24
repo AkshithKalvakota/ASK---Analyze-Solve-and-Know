@@ -40,3 +40,25 @@ export async function createProject(name: string): Promise<Project> {
 export async function deleteProject(id: string): Promise<void> {
   await api.delete(`/projects/${id}`)
 }
+
+export interface Dataset {
+  id: string
+  project_id: string
+  filename: string
+  content_type: string
+  created_at: string
+}
+
+export async function uploadDataset(projectId: string, file: File): Promise<Dataset> {
+  const formData = new FormData()
+  formData.append('file', file)
+  const res = await api.post(`/projects/${projectId}/datasets`, formData, {
+    headers: { 'Content-Type': 'multipart/form-data' },
+  })
+  return res.data
+}
+
+export async function fetchDatasets(projectId: string): Promise<Dataset[]> {
+  const res = await api.get(`/projects/${projectId}/datasets`)
+  return res.data
+}

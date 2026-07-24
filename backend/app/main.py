@@ -1,10 +1,9 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from app.api.projects import router as projects_router
+from app.api.datasets import router as datasets_router
 
 app = FastAPI(title="ASK - Analyze, Solve and Know")
-from app.api.projects import router as projects_router
-
-app.include_router(projects_router)
 
 app.add_middleware(
     CORSMiddleware,
@@ -13,6 +12,9 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+app.include_router(projects_router)
+app.include_router(datasets_router)
 
 @app.get("/health")
 def health_check():

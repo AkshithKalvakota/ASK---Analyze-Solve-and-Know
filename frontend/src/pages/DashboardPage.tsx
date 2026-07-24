@@ -1,7 +1,71 @@
 import { useEffect, useState } from 'react'
 import { useAuth, UserButton } from '@clerk/clerk-react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
-import { setTokenGetter, fetchProjects, createProject, deleteProject } from '../lib/api'
+import {
+  setTokenGetter,
+  fetchProjects,
+  createProject,
+  deleteProject,
+  uploadDataset,
+  fetchDatasets,
+} from '../lib/api'
+
+function ProjectDatasets({ projectId }: { projectId: string }) {
+  const queryClient = useQueryClient()
+
+  const { data: datasets, isLoading } = useQuery({
+    queryKey: ['datasets', projectId],
+    queryFn: () => fetchDatasets(projectId),
+  })
+
+  const uploadMutation = useMutation({
+    mutationFn: (file: File) => uploadDataset(projectId, file),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['datasets', projectId] })
+    },
+  })
+
+  function handleFileChange(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0]
+    if (file) {
+      uploadMutation.mutate(file)
+    }
+    e.target.value = '' // reset so the same file can be re-selected if needed
+  }
+
+  return (
+    <div className="mt-3 pt-3 border-t border-gray-800">
+      <label className="inline-block">
+        <span className="text-sm bg-gray-800 hover:bg-gray-700 px-3 py-1.5 rounded cursor-pointer">
+          {uploadMutation.isPending ? 'Uploading...' : 'Upload dataset'}
+        </span>
+        <input
+          type="file"
+          accept=".csv,.xls,.xlsx"
+          onChange={handleFileChange}
+          className="hidden"
+          disabled={uploadMutation.isPending}
+        />
+      </label>
+
+      {uploadMutation.isError && (
+        <p className="text-red-400 text-sm mt-2">Upload failed — check file type.</p>
+      )}
+
+      {isLoading && <p className="text-gray-500 text-sm mt-2">Loading datasets...</p>}
+
+      {datasets && datasets.length > 0 && (
+        <ul className="mt-2 space-y-1">
+          {datasets.map((d) => (
+            <li key={d.id} className="text-sm text-gray-400">
+              📄 {d.filename}
+            </li>
+          ))}
+        </ul>
+      )}
+    </div>
+  )
+}
 
 export default function DashboardPage() {
   const { getToken } = useAuth()
@@ -71,16 +135,19 @@ export default function DashboardPage() {
           {projects?.map((project) => (
             <li
               key={project.id}
-              className="flex justify-between items-center bg-gray-900 border border-gray-800 rounded px-4 py-3"
+              className="bg-gray-900 border border-gray-800 rounded px-4 py-3"
             >
-              <span>{project.name}</span>
-              <button
-                onClick={() => deleteMutation.mutate(project.id)}
-                disabled={deleteMutation.isPending}
-                className="text-red-400 hover:text-red-300 text-sm"
-              >
-                Delete
-              </button>
+              <div className="flex justify-between items-center">
+                <span>{project.name}</span>
+                <button
+                  onClick={() => deleteMutation.mutate(project.id)}
+                  disabled={deleteMutation.isPending}
+                  className="text-red-400 hover:text-red-300 text-sm"
+                >
+                  Delete
+                </button>
+              </div>
+              <ProjectDatasets projectId={project.id} />
             </li>
           ))}
         </ul>

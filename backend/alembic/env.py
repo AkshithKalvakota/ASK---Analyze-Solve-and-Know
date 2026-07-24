@@ -3,6 +3,7 @@ import sys, os
 sys.path.append(os.getcwd())
 from app.core.config import settings
 from app.db.base import Base
+from app.models.dataset import Dataset
 from app.models.project import Project
 from logging.config import fileConfig
 
