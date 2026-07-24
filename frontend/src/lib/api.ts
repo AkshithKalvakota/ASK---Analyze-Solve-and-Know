@@ -20,3 +20,23 @@ api.interceptors.request.use(async (config) => {
   }
   return config
 })
+
+export interface Project {
+  id: string
+  name: string
+  created_at: string
+}
+
+export async function fetchProjects(): Promise<Project[]> {
+  const res = await api.get('/projects')
+  return res.data
+}
+
+export async function createProject(name: string): Promise<Project> {
+  const res = await api.post('/projects', { name })
+  return res.data
+}
+
+export async function deleteProject(id: string): Promise<void> {
+  await api.delete(`/projects/${id}`)
+}
