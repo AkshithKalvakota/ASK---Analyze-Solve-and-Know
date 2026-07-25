@@ -10,7 +10,56 @@ import {
   fetchDatasets,
   profileDataset,
   setTargetColumn,
+  trainModel,
+  fetchModels,
+  type Dataset,
 } from '../lib/api'
+
+function DatasetModels({ projectId, dataset }: { projectId: string; dataset: Dataset }) {
+  const queryClient = useQueryClient()
+
+  const { data: models } = useQuery({
+    queryKey: ['models', dataset.id],
+    queryFn: () => fetchModels(projectId, dataset.id),
+    enabled: !!dataset.target_column,
+  })
+
+  const trainMutation = useMutation({
+    mutationFn: () => trainModel(projectId, dataset.id),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['models', dataset.id] })
+    },
+  })
+
+  if (!dataset.target_column) return null
+
+  return (
+    <div className="mt-2">
+      <button
+        onClick={() => trainMutation.mutate()}
+        disabled={trainMutation.isPending}
+        className="text-xs bg-green-800 hover:bg-green-700 px-2 py-1 rounded"
+      >
+        {trainMutation.isPending ? 'Training...' : 'Train Model'}
+      </button>
+
+      {trainMutation.isError && (
+        <p className="text-red-400 text-xs mt-1">Training failed.</p>
+      )}
+
+      {models && models.length > 0 && (
+        <div className="mt-2 space-y-2">
+          {models.map((m) => (
+            <div key={m.id} className="bg-gray-950 border border-gray-800 rounded p-2 text-xs">
+              <p className="text-purple-300 font-semibold">Best: {m.model_name}</p>
+              <pre className="mt-1 overflow-x-auto">{JSON.stringify(m.metrics, null, 2)}</pre>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  )
+}
 
 function ProjectDatasets({ projectId }: { projectId: string }) {
   const queryClient = useQueryClient()
@@ -112,6 +161,8 @@ function ProjectDatasets({ projectId }: { projectId: string }) {
                   )}
                 </div>
               )}
+
+              <DatasetModels projectId={projectId} dataset={d} />
             </li>
           ))}
         </ul>

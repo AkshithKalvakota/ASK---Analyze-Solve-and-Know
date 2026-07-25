@@ -5,6 +5,7 @@ from app.api.datasets import router as datasets_router
 
 app = FastAPI(title="ASK - Analyze, Solve and Know")
 
+
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["http://localhost:5173"],
@@ -12,7 +13,9 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+from app.api.models import router as models_router
 
+app.include_router(models_router)
 app.include_router(projects_router)
 app.include_router(datasets_router)
 

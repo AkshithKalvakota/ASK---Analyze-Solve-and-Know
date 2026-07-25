@@ -89,3 +89,22 @@ export async function setTargetColumn(
   })
   return res.data
 }
+
+export interface TrainedModel {
+  id: string
+  dataset_id: string
+  model_name: string
+  metrics: Record<string, number>
+  all_results: Record<string, Record<string, number>>
+  created_at: string
+}
+
+export async function trainModel(projectId: string, datasetId: string): Promise<TrainedModel> {
+  const res = await api.post(`/projects/${projectId}/datasets/${datasetId}/models`)
+  return res.data
+}
+
+export async function fetchModels(projectId: string, datasetId: string): Promise<TrainedModel[]> {
+  const res = await api.get(`/projects/${projectId}/datasets/${datasetId}/models`)
+  return res.data
+}

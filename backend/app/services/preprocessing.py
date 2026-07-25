@@ -1,3 +1,4 @@
+import re
 import pandas as pd
 from typing import Tuple, Any
 
@@ -45,9 +46,12 @@ def preprocess(df: pd.DataFrame, target_column: str) -> Tuple[pd.DataFrame, pd.S
     if categorical_cols:
         X = pd.get_dummies(X, columns=categorical_cols, dummy_na=False)
 
+    # --- Step 3: Sanitize column names — XGBoost rejects [, ], < in feature names ---
+    X.columns = [re.sub(r"[\[\]<]", "_", str(col)) for col in X.columns]
+
     log["feature_columns_after_encoding"] = X.columns.tolist()
 
-    # --- Step 3: Handle target column for classification ---
+    # --- Step 4: Handle target column for classification ---
     if not pd.api.types.is_numeric_dtype(y):
         y = y.astype("category")
         log["target_categories"] = y.cat.categories.tolist()

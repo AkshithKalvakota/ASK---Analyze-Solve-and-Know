@@ -11,8 +11,18 @@ import joblib
 from io import BytesIO
 
 def train_and_select_best(X, y, problem_type: str) -> dict:
+    if problem_type == "classification":
+        class_counts = y.value_counts()
+        if (class_counts < 2).any():
+            raise ValueError(
+                "Target column has classes with fewer than 2 samples "
+                "(minimum required for train/test split). "
+                "This target may have too many unique categories for the dataset size."
+            )
+
     X_train, X_test, y_train, y_test = train_test_split(
-        X, y, test_size=0.2, random_state=42
+        X, y, test_size=0.2, random_state=42,
+        stratify=y if problem_type == "classification" else None,
     )
 
     if problem_type == "regression":
@@ -55,7 +65,6 @@ def train_and_select_best(X, y, problem_type: str) -> dict:
                 metrics["roc_auc"] = round(float(roc_auc_score(y_test, proba)), 4)
             results[name] = metrics
 
-    # --- Select best model ---
     if problem_type == "regression":
         best_name = max(results, key=lambda n: results[n]["r2"])
     else:
@@ -63,7 +72,6 @@ def train_and_select_best(X, y, problem_type: str) -> dict:
 
     best_model = trained_models[best_name]
 
-    # Serialize the best model to bytes (for uploading to B2)
     buffer = BytesIO()
     joblib.dump(best_model, buffer)
     model_bytes = buffer.getvalue()

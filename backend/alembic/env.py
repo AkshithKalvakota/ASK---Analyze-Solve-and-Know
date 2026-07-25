@@ -5,6 +5,7 @@ from app.core.config import settings
 from app.db.base import Base
 from app.models.dataset import Dataset
 from app.models.project import Project
+from app.models.trained_model import TrainedModel
 from logging.config import fileConfig
 
 from sqlalchemy import engine_from_config
