@@ -14,3 +14,4 @@ class TrainedModel(Base):
     metrics = Column(JSONB, nullable=False)
     all_results = Column(JSONB, nullable=False)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
+    background_sample = Column(JSONB, nullable=True)

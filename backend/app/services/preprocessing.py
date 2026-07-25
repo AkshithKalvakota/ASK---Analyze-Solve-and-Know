@@ -38,6 +38,18 @@ def preprocess(df: pd.DataFrame, target_column: str) -> Tuple[pd.DataFrame, pd.S
 
     # --- Step 2: One-hot encode categorical columns ---
     categorical_cols = X.select_dtypes(include=["object", "category", "bool"]).columns.tolist()
+    
+
+    # Drop high-cardinality text columns entirely — one-hot encoding them adds
+    # noise/dimensionality with no predictive value (e.g., near-unique text like titles)
+    high_cardinality_cols = [
+        col for col in categorical_cols
+        if X[col].nunique() > 20  # heuristic threshold, tune as needed
+    ]
+    if high_cardinality_cols:
+        X = X.drop(columns=high_cardinality_cols)
+        log["dropped_high_cardinality_columns"] = high_cardinality_cols
+        categorical_cols = [c for c in categorical_cols if c not in high_cardinality_cols]
 
     for col in categorical_cols:
         categories = sorted(X[col].astype(str).unique().tolist())
