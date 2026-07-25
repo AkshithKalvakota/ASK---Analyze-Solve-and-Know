@@ -14,8 +14,51 @@ import {
   fetchModels,
   fetchInputSchema,
   predict,
+  fetchFeatureImportance,
+  explainPrediction,
   type Dataset,
+  type PredictionExplanation,
 } from '../lib/api'
+
+function FeatureImportanceDisplay({
+  projectId,
+  datasetId,
+  modelId,
+}: {
+  projectId: string
+  datasetId: string
+  modelId: string
+}) {
+  const { data, isLoading } = useQuery({
+    queryKey: ['feature-importance', modelId],
+    queryFn: () => fetchFeatureImportance(projectId, datasetId, modelId),
+  })
+
+  if (isLoading) return <p className="text-xs text-gray-500 mt-2">Loading feature importance...</p>
+  if (!data || data.feature_importance.length === 0) return null
+
+  const maxImportance = Math.max(...data.feature_importance.map((f) => f.importance))
+
+  return (
+    <div className="mt-3">
+      <p className="text-xs text-gray-400 mb-1">Feature Importance:</p>
+      <div className="space-y-1">
+        {data.feature_importance.slice(0, 8).map((f) => (
+          <div key={f.feature} className="flex items-center gap-2">
+            <span className="text-xs text-gray-500 w-20 truncate">{f.feature}</span>
+            <div className="flex-1 bg-gray-800 rounded h-3">
+              <div
+                className="bg-blue-600 h-3 rounded"
+                style={{ width: `${(f.importance / maxImportance) * 100}%` }}
+              />
+            </div>
+            <span className="text-xs text-gray-500 w-12 text-right">{f.importance}</span>
+          </div>
+        ))}
+      </div>
+    </div>
+  )
+}
 
 function PredictionForm({
   projectId,
@@ -28,6 +71,7 @@ function PredictionForm({
 }) {
   const [values, setValues] = useState<Record<string, string>>({})
   const [result, setResult] = useState<string | number | null>(null)
+  const [explanation, setExplanation] = useState<PredictionExplanation | null>(null)
 
   const { data: schema } = useQuery({
     queryKey: ['input-schema', modelId],
@@ -36,8 +80,10 @@ function PredictionForm({
 
   const predictMutation = useMutation({
     mutationFn: () => predict(projectId, datasetId, modelId, values),
-    onSuccess: (data) => {
+    onSuccess: async (data) => {
       setResult(data.prediction)
+      const exp = await explainPrediction(projectId, datasetId, modelId, values)
+      setExplanation(exp)
     },
   })
 
@@ -87,6 +133,17 @@ function PredictionForm({
           Prediction: {result}
         </p>
       )}
+
+      {explanation && (
+        <div className="mt-2 text-xs">
+          <p className="text-gray-400 mb-1">Why this prediction:</p>
+          {explanation.contributions.slice(0, 5).map((c) => (
+            <p key={c.feature} className={c.impact >= 0 ? 'text-green-400' : 'text-red-400'}>
+              {c.feature}: {c.impact >= 0 ? '+' : ''}{c.impact}
+            </p>
+          ))}
+        </div>
+      )}
     </form>
   )
 }
@@ -131,6 +188,7 @@ function DatasetModels({ projectId, dataset }: { projectId: string; dataset: Dat
             <div key={m.id} className="bg-gray-950 border border-gray-800 rounded p-2 text-xs">
               <p className="text-purple-300 font-semibold">Best: {m.model_name}</p>
               <pre className="mt-1 overflow-x-auto">{JSON.stringify(m.metrics, null, 2)}</pre>
+              <FeatureImportanceDisplay projectId={projectId} datasetId={dataset.id} modelId={m.id} />
               <PredictionForm projectId={projectId} datasetId={dataset.id} modelId={m.id} />
             </div>
           ))}

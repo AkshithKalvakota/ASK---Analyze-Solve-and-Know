@@ -137,3 +137,36 @@ export async function predict(
   )
   return res.data
 }
+
+export interface FeatureImportance {
+  feature_importance: { feature: string; importance: number }[]
+}
+
+export interface PredictionExplanation {
+  base_value: number
+  contributions: { feature: string; impact: number }[]
+}
+
+export async function fetchFeatureImportance(
+  projectId: string,
+  datasetId: string,
+  modelId: string
+): Promise<FeatureImportance> {
+  const res = await api.get(
+    `/projects/${projectId}/datasets/${datasetId}/models/${modelId}/feature-importance`
+  )
+  return res.data
+}
+
+export async function explainPrediction(
+  projectId: string,
+  datasetId: string,
+  modelId: string,
+  values: Record<string, any>
+): Promise<PredictionExplanation> {
+  const res = await api.post(
+    `/projects/${projectId}/datasets/${datasetId}/models/${modelId}/explain`,
+    { values }
+  )
+  return res.data
+}
