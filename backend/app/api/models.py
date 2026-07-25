@@ -2,7 +2,10 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 from sqlalchemy import select
 from uuid import UUID
-
+from pydantic import BaseModel
+from typing import Any
+import joblib
+from io import BytesIO
 from app.db.session import SessionLocal
 from app.models.dataset import Dataset
 from app.models.project import Project
@@ -82,3 +85,74 @@ def list_models(
 
     stmt = select(TrainedModel).where(TrainedModel.dataset_id == dataset_id)
     return db.execute(stmt).scalars().all()
+
+class PredictionInput(BaseModel):
+    values: dict[str, Any]
+
+@router.post("/{model_id}/predict")
+def predict(
+    project_id: UUID,
+    dataset_id: UUID,
+    model_id: UUID,
+    payload: PredictionInput,
+    db: Session = Depends(get_db),
+    user_id: str = Depends(get_current_user_id),
+):
+    stmt = select(Project).where(Project.id == project_id, Project.user_id == user_id)
+    project = db.execute(stmt).scalar_one_or_none()
+    if not project:
+        raise HTTPException(status_code=404, detail="Project not found")
+
+    stmt = select(TrainedModel).where(
+        TrainedModel.id == model_id, TrainedModel.dataset_id == dataset_id
+    )
+    trained_model = db.execute(stmt).scalar_one_or_none()
+    if not trained_model:
+        raise HTTPException(status_code=404, detail="Model not found")
+
+    model_bytes = download_file(trained_model.storage_key)
+    model = joblib.load(BytesIO(model_bytes))
+
+    from app.services.preprocessing import apply_preprocessing_to_row
+    X_row = apply_preprocessing_to_row(payload.values, trained_model.preprocessing_log)
+
+    prediction = model.predict(X_row)[0]
+
+    result: dict[str, Any] = {}
+    target_categories = trained_model.preprocessing_log.get("target_categories")
+    if target_categories:
+        result["prediction"] = target_categories[int(prediction)]
+    else:
+        result["prediction"] = float(prediction)
+
+    return result
+
+@router.get("/{model_id}/input-schema")
+def get_input_schema(
+    project_id: UUID,
+    dataset_id: UUID,
+    model_id: UUID,
+    db: Session = Depends(get_db),
+    user_id: str = Depends(get_current_user_id),
+):
+    stmt = select(Project).where(Project.id == project_id, Project.user_id == user_id)
+    project = db.execute(stmt).scalar_one_or_none()
+    if not project:
+        raise HTTPException(status_code=404, detail="Project not found")
+
+    stmt = select(TrainedModel).where(
+        TrainedModel.id == model_id, TrainedModel.dataset_id == dataset_id
+    )
+    trained_model = db.execute(stmt).scalar_one_or_none()
+    if not trained_model:
+        raise HTTPException(status_code=404, detail="Model not found")
+
+    stmt = select(Dataset).where(Dataset.id == dataset_id)
+    dataset = db.execute(stmt).scalar_one_or_none()
+
+    dtypes = dataset.profile_result.get("dtypes", {})
+    original_columns = [
+        col for col in dtypes.keys() if col != dataset.target_column
+    ]
+
+    return {"fields": [{"name": col, "type": dtypes[col]} for col in original_columns]}

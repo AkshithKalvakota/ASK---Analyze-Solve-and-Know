@@ -108,3 +108,32 @@ export async function fetchModels(projectId: string, datasetId: string): Promise
   const res = await api.get(`/projects/${projectId}/datasets/${datasetId}/models`)
   return res.data
 }
+
+export interface InputField {
+  name: string
+  type: string
+}
+
+export async function fetchInputSchema(
+  projectId: string,
+  datasetId: string,
+  modelId: string
+): Promise<{ fields: InputField[] }> {
+  const res = await api.get(
+    `/projects/${projectId}/datasets/${datasetId}/models/${modelId}/input-schema`
+  )
+  return res.data
+}
+
+export async function predict(
+  projectId: string,
+  datasetId: string,
+  modelId: string,
+  values: Record<string, any>
+): Promise<{ prediction: string | number }> {
+  const res = await api.post(
+    `/projects/${projectId}/datasets/${datasetId}/models/${modelId}/predict`,
+    { values }
+  )
+  return res.data
+}

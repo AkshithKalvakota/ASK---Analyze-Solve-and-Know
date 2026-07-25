@@ -60,3 +60,40 @@ def preprocess(df: pd.DataFrame, target_column: str) -> Tuple[pd.DataFrame, pd.S
         y = y.fillna(y.median())
 
     return X, y, log
+
+def apply_preprocessing_to_row(row: dict, preprocessing_log: dict) -> pd.DataFrame:
+    df = pd.DataFrame([row])
+
+    encoding_log = preprocessing_log.get("encoding", {})
+    categorical_columns = set(encoding_log.keys())
+
+    # Convert any column NOT marked as categorical to numeric
+    for col in df.columns:
+        if col not in categorical_columns:
+            df[col] = pd.to_numeric(df[col], errors="coerce")
+
+    # Apply the same imputation values recorded during training
+    for col, info in preprocessing_log.get("imputation", {}).items():
+        if col in df.columns and pd.isnull(df[col].iloc[0]):
+            df[col] = info["value"]
+
+    # Recreate one-hot encoding using the exact categories seen at training time
+    for col, info in encoding_log.items():
+        if col in df.columns:
+            value = str(df[col].iloc[0])
+            for category in info["categories"]:
+                col_name = f"{col}_{category}"
+                df[col_name] = 1 if value == category else 0
+            df = df.drop(columns=[col])
+
+    # Sanitize column names identically to training time
+    df.columns = [re.sub(r"[\[\]<]", "_", str(c)) for c in df.columns]
+
+    # Ensure all training-time columns exist, in the same order, filling missing ones with 0
+    expected_cols = preprocessing_log["feature_columns_after_encoding"]
+    for col in expected_cols:
+        if col not in df.columns:
+            df[col] = 0
+    df = df[expected_cols]
+
+    return df

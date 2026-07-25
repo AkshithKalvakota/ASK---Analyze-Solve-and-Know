@@ -12,8 +12,84 @@ import {
   setTargetColumn,
   trainModel,
   fetchModels,
+  fetchInputSchema,
+  predict,
   type Dataset,
 } from '../lib/api'
+
+function PredictionForm({
+  projectId,
+  datasetId,
+  modelId,
+}: {
+  projectId: string
+  datasetId: string
+  modelId: string
+}) {
+  const [values, setValues] = useState<Record<string, string>>({})
+  const [result, setResult] = useState<string | number | null>(null)
+
+  const { data: schema } = useQuery({
+    queryKey: ['input-schema', modelId],
+    queryFn: () => fetchInputSchema(projectId, datasetId, modelId),
+  })
+
+  const predictMutation = useMutation({
+    mutationFn: () => predict(projectId, datasetId, modelId, values),
+    onSuccess: (data) => {
+      setResult(data.prediction)
+    },
+  })
+
+  function handleChange(fieldName: string, value: string) {
+    setValues((prev) => ({ ...prev, [fieldName]: value }))
+  }
+
+  function handleSubmit(e: React.FormEvent) {
+    e.preventDefault()
+    predictMutation.mutate()
+  }
+
+  if (!schema) return <p className="text-xs text-gray-500 mt-2">Loading input fields...</p>
+
+  return (
+    <form onSubmit={handleSubmit} className="mt-3 bg-gray-950 border border-gray-800 rounded p-3">
+      <p className="text-xs text-gray-400 mb-2">Enter values to get a prediction:</p>
+      <div className="grid grid-cols-2 gap-2">
+        {schema.fields.map((field) => (
+          <div key={field.name}>
+            <label className="text-xs text-gray-500">{field.name}</label>
+            <input
+              type={field.type.includes('int') || field.type.includes('float') ? 'number' : 'text'}
+              value={values[field.name] ?? ''}
+              onChange={(e) => handleChange(field.name, e.target.value)}
+              className="w-full bg-gray-800 border border-gray-700 rounded px-2 py-1 text-xs"
+            />
+          </div>
+        ))}
+      </div>
+      <button
+        type="submit"
+        disabled={predictMutation.isPending}
+        className="mt-3 text-xs bg-blue-700 hover:bg-blue-600 px-3 py-1.5 rounded"
+      >
+        {predictMutation.isPending ? 'Predicting...' : 'Predict'}
+      </button>
+
+      {predictMutation.isError && (
+        <p className="text-red-400 text-xs mt-2">
+          {(predictMutation.error as any)?.response?.data?.detail || 'Prediction failed.'}
+        </p>
+      )}
+
+      {result !== null && (
+        <p className="text-green-400 text-sm mt-2 font-semibold">
+          Prediction: {result}
+        </p>
+      )}
+    </form>
+  )
+}
 
 function DatasetModels({ projectId, dataset }: { projectId: string; dataset: Dataset }) {
   const queryClient = useQueryClient()
@@ -44,7 +120,9 @@ function DatasetModels({ projectId, dataset }: { projectId: string; dataset: Dat
       </button>
 
       {trainMutation.isError && (
-        <p className="text-red-400 text-xs mt-1">Training failed.</p>
+        <p className="text-red-400 text-xs mt-1">
+          {(trainMutation.error as any)?.response?.data?.detail || 'Training failed.'}
+        </p>
       )}
 
       {models && models.length > 0 && (
@@ -53,6 +131,7 @@ function DatasetModels({ projectId, dataset }: { projectId: string; dataset: Dat
             <div key={m.id} className="bg-gray-950 border border-gray-800 rounded p-2 text-xs">
               <p className="text-purple-300 font-semibold">Best: {m.model_name}</p>
               <pre className="mt-1 overflow-x-auto">{JSON.stringify(m.metrics, null, 2)}</pre>
+              <PredictionForm projectId={projectId} datasetId={dataset.id} modelId={m.id} />
             </div>
           ))}
         </div>
