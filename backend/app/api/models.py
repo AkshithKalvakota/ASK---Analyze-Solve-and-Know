@@ -6,6 +6,7 @@ from pydantic import BaseModel
 from typing import Any
 import joblib
 from io import BytesIO
+import pandas as pd
 
 from app.db.session import SessionLocal
 from app.models.dataset import Dataset
@@ -17,6 +18,11 @@ from app.services.storage import download_file, upload_file
 from app.services.profiling import load_dataframe
 from app.services.preprocessing import preprocess, apply_preprocessing_to_row
 from app.services.automl import train_and_select_best
+from app.services.explainability import (
+    get_feature_importance,
+    explain_single_prediction,
+    generate_plain_english_explanation,
+)
 
 router = APIRouter(prefix="/projects/{project_id}/datasets/{dataset_id}/models", tags=["models"])
 
@@ -88,7 +94,12 @@ def list_models(
     if not project:
         raise HTTPException(status_code=404, detail="Project not found")
 
-    stmt = select(TrainedModel).where(TrainedModel.dataset_id == dataset_id)
+    stmt = (
+        select(TrainedModel)
+        .where(TrainedModel.dataset_id == dataset_id)
+        .order_by(TrainedModel.created_at.desc())
+        .limit(1)
+    )
     return db.execute(stmt).scalars().all()
 
 class PredictionInput(BaseModel):
@@ -160,9 +171,6 @@ def get_input_schema(
     ]
 
     return {"fields": [{"name": col, "type": dtypes[col]} for col in original_columns]}
-
-import pandas as pd
-from app.services.explainability import get_feature_importance, explain_single_prediction
 
 @router.get("/{model_id}/feature-importance")
 def feature_importance(
@@ -237,5 +245,11 @@ def explain_prediction(
         result = explain_single_prediction(model, X_row, X_background)
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to compute explanation: {e}")
+
+    prediction_value = model.predict(X_row)[0]
+    plain_english = generate_plain_english_explanation(
+        result["contributions"], payload.values, float(prediction_value)
+    )
+    result["plain_english"] = plain_english
 
     return result

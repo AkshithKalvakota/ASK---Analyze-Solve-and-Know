@@ -4,7 +4,6 @@ export const api = axios.create({
   baseURL: 'http://127.0.0.1:8000',
 })
 
-// This gets set once, from a component that has access to Clerk's useAuth()
 let getTokenFn: (() => Promise<string | null>) | null = null
 
 export function setTokenGetter(fn: () => Promise<string | null>) {
@@ -145,6 +144,8 @@ export interface FeatureImportance {
 export interface PredictionExplanation {
   base_value: number
   contributions: { feature: string; impact: number }[]
+  plain_english: string[]
+  sum_check: number
 }
 
 export async function fetchFeatureImportance(

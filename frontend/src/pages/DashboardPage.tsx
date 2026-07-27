@@ -157,12 +157,16 @@ function PredictionForm({
 
       {explanation && (
         <div className="mt-2 text-xs">
-          <p className="text-gray-400 mb-1">Why this prediction:</p>
-          {explanation.contributions.slice(0, 5).map((c) => (
-            <p key={c.feature} className={c.impact >= 0 ? 'text-green-400' : 'text-red-400'}>
-              {c.feature}: {c.impact >= 0 ? '+' : ''}{c.impact}
-            </p>
-          ))}
+          <p className="text-gray-400 mb-1">In plain terms:</p>
+          <ul className="list-disc list-inside space-y-1 text-gray-300">
+            {explanation.plain_english.map((sentence, i) => (
+              <li key={i}>{sentence}</li>
+            ))}
+          </ul>
+          <p className="text-gray-600 mt-2">
+            Verification: base ({explanation.base_value}) + contributions ≈ {explanation.sum_check}
+            {' '}(prediction: {result})
+          </p>
         </div>
       )}
     </form>
