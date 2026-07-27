@@ -71,6 +71,7 @@ function PredictionForm({
 }) {
   const [values, setValues] = useState<Record<string, string>>({})
   const [result, setResult] = useState<string | number | null>(null)
+  const [previousResult, setPreviousResult] = useState<string | number | null>(null)
   const [explanation, setExplanation] = useState<PredictionExplanation | null>(null)
 
   const { data: schema } = useQuery({
@@ -81,6 +82,7 @@ function PredictionForm({
   const predictMutation = useMutation({
     mutationFn: () => predict(projectId, datasetId, modelId, values),
     onSuccess: async (data) => {
+      setPreviousResult(result)
       setResult(data.prediction)
       const exp = await explainPrediction(projectId, datasetId, modelId, values)
       setExplanation(exp)
@@ -98,9 +100,14 @@ function PredictionForm({
 
   if (!schema) return <p className="text-xs text-gray-500 mt-2">Loading input fields...</p>
 
+  const changed =
+    previousResult !== null && result !== null && previousResult !== result
+
   return (
     <form onSubmit={handleSubmit} className="mt-3 bg-gray-950 border border-gray-800 rounded p-3">
-      <p className="text-xs text-gray-400 mb-2">Enter values to get a prediction:</p>
+      <p className="text-xs text-gray-400 mb-2">
+        {result === null ? 'Enter values to get a prediction:' : 'Adjust values to see what changes (what-if):'}
+      </p>
       <div className="grid grid-cols-2 gap-2">
         {schema.fields.map((field) => (
           <div key={field.name}>
@@ -119,7 +126,11 @@ function PredictionForm({
         disabled={predictMutation.isPending}
         className="mt-3 text-xs bg-blue-700 hover:bg-blue-600 px-3 py-1.5 rounded"
       >
-        {predictMutation.isPending ? 'Predicting...' : 'Predict'}
+        {predictMutation.isPending
+          ? 'Predicting...'
+          : result === null
+          ? 'Predict'
+          : 'Re-predict (what-if)'}
       </button>
 
       {predictMutation.isError && (
@@ -129,9 +140,19 @@ function PredictionForm({
       )}
 
       {result !== null && (
-        <p className="text-green-400 text-sm mt-2 font-semibold">
-          Prediction: {result}
-        </p>
+        <div className="mt-2">
+          {changed ? (
+            <p className="text-sm font-semibold">
+              <span className="text-gray-500 line-through">{previousResult}</span>
+              {' → '}
+              <span className={result > previousResult! ? 'text-green-400' : 'text-red-400'}>
+                {result}
+              </span>
+            </p>
+          ) : (
+            <p className="text-green-400 text-sm font-semibold">Prediction: {result}</p>
+          )}
+        </div>
       )}
 
       {explanation && (
