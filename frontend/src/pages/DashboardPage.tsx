@@ -20,6 +20,54 @@ import {
   type PredictionExplanation,
 } from '../lib/api'
 
+function QualityScoreBadge({ score }: { score: number }) {
+  const color =
+    score >= 80 ? 'bg-green-600' : score >= 50 ? 'bg-yellow-600' : 'bg-red-600'
+  const label = score >= 80 ? 'Good' : score >= 50 ? 'Fair' : 'Poor'
+
+  return (
+    <div className="flex items-center gap-2 mt-2">
+      <div className={`${color} text-white text-xs font-bold rounded-full w-10 h-10 flex items-center justify-center`}>
+        {Math.round(score)}
+      </div>
+      <div>
+        <p className="text-xs text-gray-400">
+          Data Quality: <span className="text-gray-200">{label}</span>
+        </p>
+      </div>
+    </div>
+  )
+}
+
+function MetricsDisplay({ metrics }: { metrics: Record<string, number> }) {
+  const labels: Record<string, string> = {
+    r2: 'R² Score',
+    mae: 'Mean Abs. Error',
+    rmse: 'RMSE',
+    accuracy: 'Accuracy',
+    precision: 'Precision',
+    recall: 'Recall',
+    f1: 'F1 Score',
+    roc_auc: 'ROC AUC',
+  }
+
+  const isPercentMetric = (key: string) =>
+    ['accuracy', 'precision', 'recall', 'f1', 'roc_auc'].includes(key)
+
+  return (
+    <div className="grid grid-cols-3 gap-2 mt-2">
+      {Object.entries(metrics).map(([key, value]) => (
+        <div key={key} className="bg-gray-900 border border-gray-800 rounded p-2 text-center">
+          <p className="text-xs text-gray-500">{labels[key] ?? key}</p>
+          <p className="text-sm font-semibold text-white mt-1">
+            {isPercentMetric(key) ? `${(value * 100).toFixed(1)}%` : value}
+          </p>
+        </div>
+      ))}
+    </div>
+  )
+}
+
 function FeatureImportanceDisplay({
   projectId,
   datasetId,
@@ -140,33 +188,41 @@ function PredictionForm({
       )}
 
       {result !== null && (
-        <div className="mt-2">
+        <div className="mt-3 bg-gray-900 border border-green-900/40 rounded-lg p-3 text-center">
           {changed ? (
-            <p className="text-sm font-semibold">
-              <span className="text-gray-500 line-through">{previousResult}</span>
+            <p className="text-lg font-bold">
+              <span className="text-gray-500 line-through text-sm">{previousResult}</span>
               {' → '}
               <span className={result > previousResult! ? 'text-green-400' : 'text-red-400'}>
                 {result}
               </span>
             </p>
           ) : (
-            <p className="text-green-400 text-sm font-semibold">Prediction: {result}</p>
+            <p className="text-green-400 text-lg font-bold">{result}</p>
           )}
+          <p className="text-xs text-gray-500 mt-1">Predicted Value</p>
         </div>
       )}
 
       {explanation && (
-        <div className="mt-2 text-xs">
-          <p className="text-gray-400 mb-1">In plain terms:</p>
-          <ul className="list-disc list-inside space-y-1 text-gray-300">
+        <div className="mt-3 bg-blue-950/30 border border-blue-900/40 rounded-lg p-3">
+          <p className="text-blue-300 text-xs font-semibold mb-2">💡 Why this prediction</p>
+          <ul className="space-y-1 text-gray-300 text-xs">
             {explanation.plain_english.map((sentence, i) => (
-              <li key={i}>{sentence}</li>
+              <li key={i} className="flex gap-1">
+                <span>•</span>
+                <span>{sentence}</span>
+              </li>
             ))}
           </ul>
-          <p className="text-gray-600 mt-2">
-            Verification: base ({explanation.base_value}) + contributions ≈ {explanation.sum_check}
-            {' '}(prediction: {result})
-          </p>
+          <details className="mt-2">
+            <summary className="text-gray-600 text-xs cursor-pointer hover:text-gray-400">
+              Show verification
+            </summary>
+            <p className="text-gray-600 text-xs mt-1">
+              base ({explanation.base_value}) + contributions ≈ {explanation.sum_check} (prediction: {result})
+            </p>
+          </details>
         </div>
       )}
     </form>
@@ -210,9 +266,11 @@ function DatasetModels({ projectId, dataset }: { projectId: string; dataset: Dat
       {models && models.length > 0 && (
         <div className="mt-2 space-y-2">
           {models.map((m) => (
-            <div key={m.id} className="bg-gray-950 border border-gray-800 rounded p-2 text-xs">
-              <p className="text-purple-300 font-semibold">Best: {m.model_name}</p>
-              <pre className="mt-1 overflow-x-auto">{JSON.stringify(m.metrics, null, 2)}</pre>
+            <div key={m.id} className="bg-gray-900 border border-purple-900/40 rounded-lg p-3 text-xs">
+              <div className="flex items-center justify-between mb-1">
+                <p className="text-purple-300 font-semibold text-sm">🏆 Best Model: {m.model_name}</p>
+              </div>
+              <MetricsDisplay metrics={m.metrics} />
               <FeatureImportanceDisplay projectId={projectId} datasetId={dataset.id} modelId={m.id} />
               <PredictionForm projectId={projectId} datasetId={dataset.id} modelId={m.id} />
             </div>
@@ -283,9 +341,12 @@ function ProjectDatasets({ projectId }: { projectId: string }) {
       {isLoading && <p className="text-gray-500 text-sm mt-2">Loading datasets...</p>}
 
       {datasets && datasets.length > 0 && (
-        <ul className="mt-2 space-y-3">
+        <ul className="mt-3 space-y-3">
           {datasets.map((d) => (
-            <li key={d.id} className="text-sm text-gray-400">
+            <li
+              key={d.id}
+              className="text-sm text-gray-400 bg-gray-950 border border-gray-800 rounded-lg p-4"
+            >
               <div className="flex items-center justify-between">
                 <span>📄 {d.filename}</span>
                 <button
@@ -296,6 +357,10 @@ function ProjectDatasets({ projectId }: { projectId: string }) {
                   {profileMutation.isPending ? 'Profiling...' : 'Profile'}
                 </button>
               </div>
+
+              {d.profile_result && (
+                <QualityScoreBadge score={d.profile_result.quality_score} />
+              )}
 
               {d.profile_result && (
                 <div className="mt-2 flex items-center gap-2">
@@ -401,7 +466,7 @@ export default function DashboardPage() {
           {projects?.map((project) => (
             <li
               key={project.id}
-              className="bg-gray-900 border border-gray-800 rounded px-4 py-3"
+              className="bg-gray-900 border border-gray-800 rounded-lg px-5 py-4 shadow-sm"
             >
               <div className="flex justify-between items-center">
                 <span>{project.name}</span>
