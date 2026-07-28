@@ -162,15 +162,17 @@ def get_input_schema(
     if not trained_model:
         raise HTTPException(status_code=404, detail="Model not found")
 
+    raw_fields = trained_model.preprocessing_log.get("raw_feature_columns")
+
+    if raw_fields:
+        return {"fields": raw_fields}
+
+    # Fallback for models trained before this feature existed
     stmt = select(Dataset).where(Dataset.id == dataset_id)
     dataset = db.execute(stmt).scalar_one_or_none()
-
     dtypes = dataset.profile_result.get("dtypes", {})
-    original_columns = [
-        col for col in dtypes.keys() if col != dataset.target_column
-    ]
-
-    return {"fields": [{"name": col, "type": dtypes[col]} for col in original_columns]}
+    original_columns = [col for col in dtypes.keys() if col != dataset.target_column]
+    return {"fields": [{"name": col, "type": "numeric", "categories": None} for col in original_columns]}
 
 @router.get("/{model_id}/feature-importance")
 def feature_importance(

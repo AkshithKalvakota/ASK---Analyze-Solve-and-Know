@@ -8,6 +8,7 @@ import {
   deleteProject,
   uploadDataset,
   fetchDatasets,
+  deleteDataset,
   profileDataset,
   setTargetColumn,
   trainModel,
@@ -160,12 +161,29 @@ function PredictionForm({
         {schema.fields.map((field) => (
           <div key={field.name}>
             <label className="text-xs text-gray-500">{field.name}</label>
-            <input
-              type={field.type.includes('int') || field.type.includes('float') ? 'number' : 'text'}
-              value={values[field.name] ?? ''}
-              onChange={(e) => handleChange(field.name, e.target.value)}
-              className="w-full bg-gray-800 border border-gray-700 rounded px-2 py-1 text-xs"
-            />
+            {field.type === 'categorical' && field.categories ? (
+              <select
+                value={values[field.name] ?? ''}
+                onChange={(e) => handleChange(field.name, e.target.value)}
+                className="w-full bg-gray-800 border border-gray-700 rounded px-2 py-1 text-xs"
+              >
+                <option value="" disabled>
+                  Select...
+                </option>
+                {field.categories.map((cat) => (
+                  <option key={cat} value={cat}>
+                    {cat}
+                  </option>
+                ))}
+              </select>
+            ) : (
+              <input
+                type="number"
+                value={values[field.name] ?? ''}
+                onChange={(e) => handleChange(field.name, e.target.value)}
+                className="w-full bg-gray-800 border border-gray-700 rounded px-2 py-1 text-xs"
+              />
+            )}
           </div>
         ))}
       </div>
@@ -296,6 +314,13 @@ function ProjectDatasets({ projectId }: { projectId: string }) {
     },
   })
 
+  const deleteMutation = useMutation({
+    mutationFn: (datasetId: string) => deleteDataset(projectId, datasetId),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['datasets', projectId] })
+    },
+  })
+
   const profileMutation = useMutation({
     mutationFn: (datasetId: string) => profileDataset(projectId, datasetId),
     onSuccess: () => {
@@ -349,13 +374,26 @@ function ProjectDatasets({ projectId }: { projectId: string }) {
             >
               <div className="flex items-center justify-between">
                 <span>📄 {d.filename}</span>
-                <button
-                  onClick={() => profileMutation.mutate(d.id)}
-                  disabled={profileMutation.isPending}
-                  className="text-xs bg-gray-800 hover:bg-gray-700 px-2 py-1 rounded"
-                >
-                  {profileMutation.isPending ? 'Profiling...' : 'Profile'}
-                </button>
+                <div className="flex gap-2">
+                  <button
+                    onClick={() => profileMutation.mutate(d.id)}
+                    disabled={profileMutation.isPending}
+                    className="text-xs bg-gray-800 hover:bg-gray-700 px-2 py-1 rounded"
+                  >
+                    {profileMutation.isPending ? 'Profiling...' : 'Profile'}
+                  </button>
+                  <button
+                    onClick={() => {
+                      if (confirm(`Delete "${d.filename}"? This cannot be undone.`)) {
+                        deleteMutation.mutate(d.id)
+                      }
+                    }}
+                    disabled={deleteMutation.isPending}
+                    className="text-xs bg-red-900 hover:bg-red-800 text-red-200 px-2 py-1 rounded"
+                  >
+                    Delete
+                  </button>
+                </div>
               </div>
 
               {d.profile_result && (

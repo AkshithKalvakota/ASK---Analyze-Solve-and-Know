@@ -71,6 +71,10 @@ export async function fetchDatasets(projectId: string): Promise<Dataset[]> {
   return res.data
 }
 
+export async function deleteDataset(projectId: string, datasetId: string): Promise<void> {
+  await api.delete(`/projects/${projectId}/datasets/${datasetId}`)
+}
+
 export async function profileDataset(projectId: string, datasetId: string): Promise<Dataset> {
   const res = await api.post(`/projects/${projectId}/datasets/${datasetId}/profile`)
   return res.data
@@ -111,6 +115,7 @@ export async function fetchModels(projectId: string, datasetId: string): Promise
 export interface InputField {
   name: string
   type: string
+  categories?: string[] | null
 }
 
 export async function fetchInputSchema(

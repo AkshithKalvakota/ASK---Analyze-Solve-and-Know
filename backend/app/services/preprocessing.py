@@ -36,15 +36,12 @@ def preprocess(df: pd.DataFrame, target_column: str) -> Tuple[pd.DataFrame, pd.S
                 X[col] = X[col].fillna(fill_value)
                 log["imputation"][col] = {"strategy": "mode", "value": str(fill_value)}
 
-    # --- Step 2: One-hot encode categorical columns ---
+    # --- Step 2: Identify categorical columns, drop high-cardinality ones ---
     categorical_cols = X.select_dtypes(include=["object", "category", "bool"]).columns.tolist()
-    
 
-    # Drop high-cardinality text columns entirely — one-hot encoding them adds
-    # noise/dimensionality with no predictive value (e.g., near-unique text like titles)
     high_cardinality_cols = [
         col for col in categorical_cols
-        if X[col].nunique() > 20  # heuristic threshold, tune as needed
+        if X[col].nunique() > 20
     ]
     if high_cardinality_cols:
         X = X.drop(columns=high_cardinality_cols)
@@ -55,15 +52,28 @@ def preprocess(df: pd.DataFrame, target_column: str) -> Tuple[pd.DataFrame, pd.S
         categories = sorted(X[col].astype(str).unique().tolist())
         log["encoding"][col] = {"categories": categories}
 
+    # --- Step 3: Record raw (pre-encoding) feature list for building input forms ---
+    # This tells the frontend exactly which fields are categorical (with valid
+    # options) vs numeric, so it can render a dropdown instead of free text.
+    log["raw_feature_columns"] = [
+        {
+            "name": col,
+            "type": "categorical" if col in categorical_cols else "numeric",
+            "categories": log["encoding"].get(col, {}).get("categories"),
+        }
+        for col in X.columns
+    ]
+
+    # --- Step 4: One-hot encode categorical columns ---
     if categorical_cols:
         X = pd.get_dummies(X, columns=categorical_cols, dummy_na=False)
 
-    # --- Step 3: Sanitize column names — XGBoost rejects [, ], < in feature names ---
+    # --- Step 5: Sanitize column names — XGBoost rejects [, ], < in feature names ---
     X.columns = [re.sub(r"[\[\]<]", "_", str(col)) for col in X.columns]
 
     log["feature_columns_after_encoding"] = X.columns.tolist()
 
-    # --- Step 4: Handle target column for classification ---
+    # --- Step 6: Handle target column for classification ---
     if not pd.api.types.is_numeric_dtype(y):
         y = y.astype("category")
         log["target_categories"] = y.cat.categories.tolist()
@@ -73,7 +83,12 @@ def preprocess(df: pd.DataFrame, target_column: str) -> Tuple[pd.DataFrame, pd.S
 
     return X, y, log
 
+
 def apply_preprocessing_to_row(row: dict, preprocessing_log: dict) -> pd.DataFrame:
+    """
+    Takes a single raw input row (dict of feature_name -> value) and transforms it
+    into the exact same shape/columns the model was trained on, using the saved log.
+    """
     df = pd.DataFrame([row])
 
     encoding_log = preprocessing_log.get("encoding", {})
