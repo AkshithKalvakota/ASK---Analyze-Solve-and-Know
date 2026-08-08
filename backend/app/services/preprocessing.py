@@ -5,7 +5,8 @@ from typing import Tuple, Any
 def preprocess(df: pd.DataFrame, target_column: str) -> Tuple[pd.DataFrame, pd.Series, dict]:
     """
     Splits df into X (features) and y (target), handles missing values,
-    and one-hot encodes categorical columns.
+    and one-hot encodes categorical columns (dropping one category per
+    field to avoid collinear dummy columns).
 
     Returns:
         X: preprocessed feature DataFrame, ready for model training
@@ -39,38 +40,41 @@ def preprocess(df: pd.DataFrame, target_column: str) -> Tuple[pd.DataFrame, pd.S
     # --- Step 2: Identify categorical columns, drop high-cardinality ones ---
     categorical_cols = X.select_dtypes(include=["object", "category", "bool"]).columns.tolist()
 
-    high_cardinality_cols = [
-        col for col in categorical_cols
-        if X[col].nunique() > 20
-    ]
+    high_cardinality_cols = [col for col in categorical_cols if X[col].nunique() > 20]
     if high_cardinality_cols:
         X = X.drop(columns=high_cardinality_cols)
         log["dropped_high_cardinality_columns"] = high_cardinality_cols
         categorical_cols = [c for c in categorical_cols if c not in high_cardinality_cols]
 
+    # --- Step 3: Record raw (pre-encoding) feature list, used by the frontend
+    # to build the input form (numeric input vs categorical dropdown) ---
+    numeric_cols = [c for c in X.columns if c not in categorical_cols]
+    log["raw_feature_columns"] = (
+        [{"name": c, "type": "numeric", "categories": None} for c in numeric_cols]
+        + [{"name": c, "type": "categorical", "categories": None} for c in categorical_cols]
+    )
+
+    # --- Step 4: One-hot encode, dropping one category per field to avoid
+    # collinearity (e.g. sex_male = 1 - sex_female would otherwise let tree
+    # models split importance arbitrarily between two redundant columns) ---
     for col in categorical_cols:
-        categories = sorted(X[col].astype(str).unique().tolist())
-        log["encoding"][col] = {"categories": categories}
-
-    # --- Step 3: Record raw (pre-encoding) feature list for building input forms ---
-    # This tells the frontend exactly which fields are categorical (with valid
-    # options) vs numeric, so it can render a dropdown instead of free text.
-    log["raw_feature_columns"] = [
-        {
-            "name": col,
-            "type": "categorical" if col in categorical_cols else "numeric",
-            "categories": log["encoding"].get(col, {}).get("categories"),
+        all_categories = sorted(X[col].astype(str).unique().tolist())
+        encoded_categories = all_categories[1:]  # drop first as baseline
+        log["encoding"][col] = {
+            "categories": all_categories,               # full list, for dropdown options
+            "encoded_categories": encoded_categories,    # actual dummy columns created
         }
-        for col in X.columns
-    ]
+        # backfill full category list into raw_feature_columns for this field
+        for field in log["raw_feature_columns"]:
+            if field["name"] == col:
+                field["categories"] = all_categories
 
-    # --- Step 4: One-hot encode categorical columns ---
-    if categorical_cols:
-        X = pd.get_dummies(X, columns=categorical_cols, dummy_na=False)
+        for cat in encoded_categories:
+            X[f"{col}_{cat}"] = (X[col].astype(str) == cat).astype(int)
+        X = X.drop(columns=[col])
 
     # --- Step 5: Sanitize column names — XGBoost rejects [, ], < in feature names ---
-    X.columns = [re.sub(r"[\[\]<]", "_", str(col)) for col in X.columns]
-
+    X.columns = [re.sub(r"[\[\]<]", "_", str(c)) for c in X.columns]
     log["feature_columns_after_encoding"] = X.columns.tolist()
 
     # --- Step 6: Handle target column for classification ---
@@ -104,11 +108,12 @@ def apply_preprocessing_to_row(row: dict, preprocessing_log: dict) -> pd.DataFra
         if col in df.columns and pd.isnull(df[col].iloc[0]):
             df[col] = info["value"]
 
-    # Recreate one-hot encoding using the exact categories seen at training time
+    # Recreate one-hot encoding using only the encoded (non-dropped) categories
     for col, info in encoding_log.items():
         if col in df.columns:
             value = str(df[col].iloc[0])
-            for category in info["categories"]:
+            encoded_categories = info.get("encoded_categories", info["categories"])
+            for category in encoded_categories:
                 col_name = f"{col}_{category}"
                 df[col_name] = 1 if value == category else 0
             df = df.drop(columns=[col])

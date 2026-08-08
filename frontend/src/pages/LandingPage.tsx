@@ -1,8 +1,8 @@
 import { useEffect, useState } from 'react'
 import { SignInButton } from '@clerk/clerk-react'
 
-const QUESTION = 'Why did revenue drop in March?'
-const ANSWER = 'Refund rate rose 18% in the Northeast region — mostly from one product line.'
+const QUESTION = 'What will this house sell for?'
+const ANSWER = '₹52,00,000 — driven mainly by area and number of bathrooms.'
 
 function TypedQuestion() {
   const [typed, setTyped] = useState('')

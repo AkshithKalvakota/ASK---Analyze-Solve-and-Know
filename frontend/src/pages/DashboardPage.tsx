@@ -88,17 +88,17 @@ function FeatureImportanceDisplay({
   return (
     <div className="mt-4">
       <p className="text-xs text-[#8A93A6] mb-2 font-mono tracking-wide">FEATURE IMPORTANCE</p>
-      <div className="space-y-1.5">
+      <div className="space-y-2">
         {data.feature_importance.slice(0, 8).map((f) => (
-          <div key={f.feature} className="flex items-center gap-2">
-            <span className="text-xs text-[#8A93A6] w-20 truncate">{f.feature}</span>
-            <div className="flex-1 bg-[#0B1220] rounded h-2.5">
+          <div key={f.feature} className="flex items-center gap-3">
+            <span className="text-xs text-[#EDEEF2] w-28 truncate" title={f.feature}>{f.feature}</span>
+            <div className="flex-1 bg-[#0B1220] rounded h-3">
               <div
-                className="bg-[#4FD1C5] h-2.5 rounded"
+                className="bg-[#4FD1C5] h-3 rounded"
                 style={{ width: `${(f.importance / maxImportance) * 100}%` }}
               />
             </div>
-            <span className="font-mono text-[10px] text-[#8A93A6] w-12 text-right">{f.importance}</span>
+            <span className="font-mono text-xs text-[#8A93A6] w-14 text-right">{f.importance}</span>
           </div>
         ))}
       </div>
@@ -153,7 +153,7 @@ function PredictionForm({
       <p className="text-xs text-[#8A93A6] mb-3 font-mono tracking-wide">
         {result === null ? 'PREDICT' : 'WHAT-IF'}
       </p>
-      <div className="grid grid-cols-2 gap-2">
+      <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
         {schema.fields.map((field) => (
           <div key={field.name}>
             <label className="text-xs text-[#8A93A6]">{field.name}</label>
@@ -161,7 +161,7 @@ function PredictionForm({
               <select
                 value={values[field.name] ?? ''}
                 onChange={(e) => handleChange(field.name, e.target.value)}
-                className="w-full bg-[#121A2B] border border-[#2A3550] rounded px-2 py-1.5 text-xs text-[#EDEEF2] mt-0.5"
+                className="w-full bg-[#121A2B] border-2 border-[#4FD1C5]/40 rounded-md px-3 py-2 text-sm text-[#EDEEF2] mt-1 focus:border-[#4FD1C5] transition"
               >
                 <option value="" disabled>Select...</option>
                 {field.categories.map((cat) => (
@@ -173,7 +173,7 @@ function PredictionForm({
                 type="number"
                 value={values[field.name] ?? ''}
                 onChange={(e) => handleChange(field.name, e.target.value)}
-                className="w-full bg-[#121A2B] border border-[#2A3550] rounded px-2 py-1.5 text-xs text-[#EDEEF2] mt-0.5"
+                className="w-full bg-[#121A2B] border-2 border-[#2A3550] rounded-md px-3 py-2 text-sm text-[#EDEEF2] mt-1 focus:border-[#4FD1C5] transition"
               />
             )}
           </div>
@@ -182,7 +182,7 @@ function PredictionForm({
       <button
         type="submit"
         disabled={predictMutation.isPending}
-        className="mt-4 text-xs font-semibold bg-[#E8B04B] text-[#0B1220] hover:brightness-110 px-4 py-2 rounded-md disabled:opacity-50 transition"
+        className="mt-4 text-sm font-semibold bg-[#E8B04B] text-[#0B1220] hover:brightness-110 px-5 py-2.5 rounded-md disabled:opacity-50 transition"
       >
         {predictMutation.isPending ? 'Predicting...' : result === null ? 'Predict' : 'Re-predict'}
       </button>
@@ -256,7 +256,7 @@ function DatasetModels({ projectId, dataset }: { projectId: string; dataset: Dat
       <button
         onClick={() => trainMutation.mutate()}
         disabled={trainMutation.isPending}
-        className="text-xs font-semibold bg-[#4FD1C5] text-[#0B1220] hover:brightness-110 px-3 py-1.5 rounded-md transition disabled:opacity-50"
+        className="text-sm font-semibold bg-[#4FD1C5] text-[#0B1220] hover:brightness-110 px-4 py-2 rounded-md transition disabled:opacity-50"
       >
         {trainMutation.isPending ? 'Training...' : 'Train Model'}
       </button>
@@ -329,8 +329,8 @@ function ProjectDatasets({ projectId }: { projectId: string }) {
   return (
     <div className="mt-4 pt-4 border-t border-[#2A3550]">
       <label className="inline-block">
-        <span className="text-xs font-semibold bg-[#121A2B] border border-[#2A3550] hover:border-[#4FD1C5] text-[#EDEEF2] px-4 py-2 rounded-md cursor-pointer transition">
-          {uploadMutation.isPending ? 'Uploading...' : '+ Upload dataset'}
+        <span className="text-sm font-semibold bg-[#121A2B] border-2 border-[#4FD1C5]/50 hover:border-[#4FD1C5] hover:bg-[#1A2436] text-[#EDEEF2] px-6 py-3 rounded-lg cursor-pointer transition inline-block">
+          {uploadMutation.isPending ? 'Uploading...' : '📤 Upload dataset'}
         </span>
         <input
           type="file"
@@ -357,7 +357,7 @@ function ProjectDatasets({ projectId }: { projectId: string }) {
                   <button
                     onClick={() => profileMutation.mutate(d.id)}
                     disabled={profileMutation.isPending}
-                    className="text-xs bg-[#121A2B] border border-[#2A3550] hover:border-[#4FD1C5] text-[#EDEEF2] px-2.5 py-1 rounded transition"
+                    className="text-xs bg-[#121A2B] border border-[#2A3550] hover:border-[#4FD1C5] text-[#EDEEF2] px-3 py-1.5 rounded transition"
                   >
                     {profileMutation.isPending ? 'Profiling...' : 'Profile'}
                   </button>
@@ -368,7 +368,7 @@ function ProjectDatasets({ projectId }: { projectId: string }) {
                       }
                     }}
                     disabled={deleteMutation.isPending}
-                    className="text-xs bg-[#2A1418] border border-[#E85D5D]/40 text-[#E85D5D] px-2.5 py-1 rounded hover:bg-[#3A1B20] transition"
+                    className="text-xs bg-[#2A1418] border border-[#E85D5D]/40 text-[#E85D5D] px-3 py-1.5 rounded hover:bg-[#3A1B20] transition"
                   >
                     Delete
                   </button>
@@ -378,12 +378,12 @@ function ProjectDatasets({ projectId }: { projectId: string }) {
               {d.profile_result && <QualityScoreBadge score={d.profile_result.quality_score} />}
 
               {d.profile_result && (
-                <div className="mt-3 flex items-center gap-2">
+                <div className="mt-3 flex items-center gap-2 flex-wrap">
                   <label className="text-xs text-[#8A93A6]">Predict:</label>
                   <select
                     value={d.target_column ?? ''}
                     onChange={(e) => targetMutation.mutate({ datasetId: d.id, column: e.target.value })}
-                    className="bg-[#121A2B] border border-[#2A3550] rounded px-2 py-1 text-xs text-[#EDEEF2]"
+                    className="bg-[#121A2B] border-2 border-[#4FD1C5]/40 rounded-md px-3 py-2 text-sm text-[#EDEEF2] focus:border-[#4FD1C5] transition"
                   >
                     <option value="" disabled>Select column</option>
                     {Object.keys(d.profile_result.dtypes).map((col) => (
@@ -391,7 +391,7 @@ function ProjectDatasets({ projectId }: { projectId: string }) {
                     ))}
                   </select>
                   {d.problem_type && (
-                    <span className="text-xs bg-[#1A2436] border border-[#4FD1C5]/30 text-[#4FD1C5] px-2 py-1 rounded">
+                    <span className="text-xs bg-[#1A2436] border border-[#4FD1C5]/30 text-[#4FD1C5] px-2.5 py-1.5 rounded">
                       {d.problem_type}
                     </span>
                   )}
@@ -442,7 +442,7 @@ export default function DashboardPage() {
   }
 
   return (
-    <div className="min-h-screen bg-[#0B1220] text-[#EDEEF2] font-[Inter]">
+    <div className="min-h-screen w-full bg-[#0B1220] text-[#EDEEF2] font-[Inter]">
       <header className="flex justify-between items-center px-6 md:px-10 py-5 border-b border-[#1A2436]">
         <div className="flex items-center gap-2">
           <span className="font-[Space_Grotesk] font-bold text-xl tracking-tight">ASK</span>
@@ -451,14 +451,14 @@ export default function DashboardPage() {
         <UserButton />
       </header>
 
-      <main className="p-6 md:p-10 max-w-3xl mx-auto">
+      <main className="p-6 md:p-10 max-w-5xl mx-auto w-full">
         <form onSubmit={handleCreate} className="flex gap-2 mb-8">
           <input
             type="text"
             value={newProjectName}
             onChange={(e) => setNewProjectName(e.target.value)}
             placeholder="New project name"
-            className="flex-1 bg-[#121A2B] border border-[#2A3550] rounded-md px-4 py-2.5 text-[#EDEEF2] placeholder:text-[#8A93A6]"
+            className="flex-1 bg-[#121A2B] border-2 border-[#2A3550] rounded-md px-4 py-2.5 text-[#EDEEF2] placeholder:text-[#8A93A6] focus:border-[#4FD1C5] transition"
           />
           <button
             type="submit"
