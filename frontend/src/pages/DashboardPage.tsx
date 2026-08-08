@@ -87,7 +87,10 @@ function FeatureImportanceDisplay({
 
   return (
     <div className="mt-4">
-      <p className="text-xs text-[#8A93A6] mb-2 font-mono tracking-wide">FEATURE IMPORTANCE</p>
+      <div className="flex items-center gap-2 mb-3">
+        <span className="w-1.5 h-1.5 rounded-full bg-[#4FD1C5]" />
+        <p className="text-xs text-[#4FD1C5] font-mono tracking-widest font-semibold">FEATURE IMPORTANCE</p>
+    </div>
       <div className="space-y-2">
         {data.feature_importance.slice(0, 8).map((f) => (
           <div key={f.feature} className="flex items-center gap-3">
@@ -150,9 +153,12 @@ function PredictionForm({
 
   return (
     <form onSubmit={handleSubmit} className="mt-4 bg-[#0B1220] border border-[#2A3550] rounded-lg p-4">
-      <p className="text-xs text-[#8A93A6] mb-3 font-mono tracking-wide">
-        {result === null ? 'PREDICT' : 'WHAT-IF'}
-      </p>
+      <div className="flex items-center gap-2 mb-4">
+        <span className="w-1.5 h-1.5 rounded-full bg-[#4FD1C5]" />
+        <p className="text-xs text-[#4FD1C5] font-mono tracking-widest font-semibold">
+          {result === null ? 'PREDICT' : 'WHAT-IF'}
+        </p>
+      </div>
       <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
         {schema.fields.map((field) => (
           <div key={field.name}>
@@ -350,7 +356,7 @@ function ProjectDatasets({ projectId }: { projectId: string }) {
       {datasets && datasets.length > 0 && (
         <ul className="mt-3 space-y-3">
           {datasets.map((d) => (
-            <li key={d.id} className="bg-[#0B1220] border border-[#2A3550] rounded-lg p-4">
+            <li key={d.id} className="bg-[#0B1220] border border-[#2A3550] rounded-lg p-4 hover:border-[#4FD1C5]/40 transition-colors">
               <div className="flex items-center justify-between">
                 <span className="text-sm text-[#EDEEF2]">📄 {d.filename}</span>
                 <div className="flex gap-2">
@@ -474,7 +480,7 @@ export default function DashboardPage() {
 
         <ul className="space-y-4">
           {projects?.map((project) => (
-            <li key={project.id} className="bg-[#121A2B] border border-[#1A2436] rounded-xl px-6 py-5 shadow-sm">
+            <li key={project.id} className="bg-[#121A2B] border border-[#1A2436] rounded-xl px-6 py-5 shadow-sm hover:border-[#2A3550] transition-colors">
               <div className="flex justify-between items-center">
                 <span className="font-[Space_Grotesk] font-semibold text-lg">{project.name}</span>
                 <button
