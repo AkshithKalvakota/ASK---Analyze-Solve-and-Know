@@ -20,5 +20,5 @@ def get_current_user_id(request: Request) -> str:
         return request_state.payload["sub"]
     except HTTPException:
         raise
-    except Exception:
-        raise HTTPException(status_code=401, detail="Invalid or expired token")
+    except Exception as e:
+        raise HTTPException(status_code=401, detail=f"Auth error: {str(e)}")
