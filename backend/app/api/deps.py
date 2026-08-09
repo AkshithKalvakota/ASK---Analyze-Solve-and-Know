@@ -14,6 +14,7 @@ def get_current_user_id(request: Request) -> str:
                     "http://localhost:5173",
                     "https://ask-analyze-solve-and-know.vercel.app",
                 ],
+            ),
         )
         if not request_state.is_signed_in:
             raise HTTPException(status_code=401, detail="Not signed in")
