@@ -8,11 +8,15 @@ app = FastAPI(title="ASK - Analyze, Solve and Know")
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:5173"],
+    allow_origins=[
+        "http://localhost:5173",
+        "https://ask-analyze-solve-and-know.vercel.app",
+    ],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
 from app.api.models import router as models_router
 
 app.include_router(models_router)
