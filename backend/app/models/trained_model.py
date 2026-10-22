@@ -21,3 +21,13 @@ class TrainedModel(Base):
         # The column this model predicts. It can differ from the dataset's current
         # target if the user picked another column after building (not a DB column)
         return (self.preprocessing_log or {}).get("target_column")
+
+    @property
+    def excluded_columns(self) -> list[str]:
+        # Columns the user left out when building this model
+        return (self.preprocessing_log or {}).get("excluded_columns", [])
+
+    @property
+    def sheet(self) -> str | None:
+        # The Excel sheet this model learned from (None for CSV files and older models)
+        return (self.preprocessing_log or {}).get("sheet")

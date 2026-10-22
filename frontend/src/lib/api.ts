@@ -54,6 +54,8 @@ export interface Dataset {
   profile_result?: {
     columns?: string[] // file order; missing on datasets profiled before it was added
     unique_counts?: Record<string, number> // also missing on older profiles
+    sheets?: string[] // Excel only: every sheet in the workbook
+    sheet?: string | null // Excel only: the sheet being read
     dtypes: Record<string, string>
     quality_score: number
     n_rows: number
@@ -83,8 +85,11 @@ export async function deleteDataset(projectId: string, datasetId: string): Promi
   await api.delete(`/projects/${projectId}/datasets/${datasetId}`)
 }
 
-export async function profileDataset(projectId: string, datasetId: string): Promise<Dataset> {
-  const res = await api.post(`/projects/${projectId}/datasets/${datasetId}/profile`)
+// Pass `sheet` to switch an Excel file to another sheet
+export async function profileDataset(projectId: string, datasetId: string, sheet?: string): Promise<Dataset> {
+  const res = await api.post(`/projects/${projectId}/datasets/${datasetId}/profile`, null, {
+    params: sheet ? { sheet } : undefined,
+  })
   return res.data
 }
 
@@ -108,11 +113,20 @@ export interface TrainedModel {
   metrics: Record<string, number>
   all_results: Record<string, Record<string, number>>
   target_column?: string | null // what this model predicts (may differ from the dataset's current target)
+  excluded_columns?: string[] // columns the user left out when building it
+  sheet?: string | null // Excel sheet it learned from
   created_at: string
 }
 
-export async function trainModel(projectId: string, datasetId: string): Promise<TrainedModel> {
-  const res = await api.post(`/projects/${projectId}/datasets/${datasetId}/models`)
+export async function trainModel(
+  projectId: string,
+  datasetId: string,
+  excludeColumns?: string[]
+): Promise<TrainedModel> {
+  const res = await api.post(
+    `/projects/${projectId}/datasets/${datasetId}/models`,
+    excludeColumns ? { exclude_columns: excludeColumns } : undefined
+  )
   return res.data
 }
 

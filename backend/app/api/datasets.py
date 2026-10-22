@@ -13,7 +13,7 @@ from app.models.project import Project
 from app.schemas.dataset import DatasetOut
 from app.api.deps import get_current_user_id
 from app.services.storage import upload_file, download_file
-from app.services.profiling import load_dataframe, profile_dataset
+from app.services.profiling import load_dataframe, profile_dataset, excel_sheet_names
 from app.services.target_detection import detect_problem_type
 
 router = APIRouter(prefix="/projects/{project_id}/datasets", tags=["datasets"])
@@ -36,10 +36,15 @@ ALLOWED_EXTENSIONS = {".csv", ".xlsx", ".xls"}
 UNREADABLE_FILE = "We couldn't read this file. Please check it opens in Excel and is saved as .csv, .xlsx or .xls."
 
 
+def dataset_sheet(dataset: Dataset) -> str | None:
+    """The Excel sheet the user picked (kept in the profile); None means the first sheet or a CSV."""
+    return (dataset.profile_result or {}).get("sheet")
+
+
 def read_dataset_file(dataset: Dataset):
     file_bytes = download_file(dataset.storage_key)
     try:
-        return load_dataframe(file_bytes, dataset.content_type, dataset.filename)
+        return load_dataframe(file_bytes, dataset.content_type, dataset.filename, dataset_sheet(dataset))
     except Exception:
         raise HTTPException(status_code=400, detail=UNREADABLE_FILE)
 
@@ -162,6 +167,7 @@ def delete_dataset(
 def profile_dataset_endpoint(
     project_id: UUID,
     dataset_id: UUID,
+    sheet: str | None = None,  # Excel only: switch to this sheet
     db: Session = Depends(get_db),
     user_id: str = Depends(get_current_user_id),
 ):
@@ -175,8 +181,33 @@ def profile_dataset_endpoint(
     if not dataset:
         raise HTTPException(status_code=404, detail="Dataset not found")
 
-    df = read_dataset_file(dataset)
+    file_bytes = download_file(dataset.storage_key)
+    try:
+        sheets = excel_sheet_names(file_bytes, dataset.content_type, dataset.filename)
+    except Exception:
+        raise HTTPException(status_code=400, detail=UNREADABLE_FILE)
+    if sheet is not None and sheet not in sheets:
+        raise HTTPException(status_code=400, detail="That sheet isn't in this file.")
+
+    # Keep the user's earlier choice when re-checking; otherwise start with the first sheet
+    previous_sheet = dataset_sheet(dataset)
+    chosen = sheet or (previous_sheet if previous_sheet in sheets else (sheets[0] if sheets else None))
+    try:
+        df = load_dataframe(file_bytes, dataset.content_type, dataset.filename, chosen)
+    except Exception:
+        raise HTTPException(status_code=400, detail=UNREADABLE_FILE)
+
     result = profile_dataset(df)
+    if sheets:
+        result["sheets"] = sheets
+        result["sheet"] = chosen
+
+    # Another sheet means other data: the old target choice no longer applies
+    # (no saved choice means the first sheet was being read)
+    switched_sheet = sheet is not None and sheet != (previous_sheet or sheets[0])
+    if switched_sheet or (dataset.target_column and dataset.target_column not in result["dtypes"]):
+        dataset.target_column = None
+        dataset.problem_type = None
 
     dataset.profile_result = result
     db.commit()

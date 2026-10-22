@@ -35,10 +35,16 @@ def get_db():
     finally:
         db.close()
 
+class TrainOptions(BaseModel):
+    # Columns the user unticked (IDs, names, columns that give the answer away)
+    exclude_columns: list[str] = []
+
+
 @router.post("", response_model=TrainedModelOut)
 def train_model(
     project_id: UUID,
     dataset_id: UUID,
+    payload: TrainOptions | None = None,
     db: Session = Depends(get_db),
     user_id: str = Depends(get_current_user_id),
 ):
@@ -55,10 +61,25 @@ def train_model(
     if not dataset.target_column or not dataset.problem_type:
         raise HTTPException(status_code=400, detail="Target column not set for this dataset")
 
+    sheet = (dataset.profile_result or {}).get("sheet")
     file_bytes = download_file(dataset.storage_key)
-    df = load_dataframe(file_bytes, dataset.content_type, dataset.filename)
+    df = load_dataframe(file_bytes, dataset.content_type, dataset.filename, sheet)
+
+    excluded = [
+        c for c in (payload.exclude_columns if payload else [])
+        if c in df.columns and c != dataset.target_column
+    ]
+    df = df.drop(columns=excluded)
 
     X, y, preprocessing_log = preprocess(df, dataset.target_column, dataset.problem_type)
+    preprocessing_log["excluded_columns"] = excluded
+    preprocessing_log["sheet"] = sheet
+    if X.shape[1] == 0:
+        raise HTTPException(
+            status_code=400,
+            detail="There are no columns left to learn from. Tick at least one more column "
+                   "(text columns with more than 20 different values can't be used).",
+        )
 
     try:
         result = train_and_select_best(X, y, dataset.problem_type)
@@ -224,7 +245,8 @@ def sample_row(
     target = log["target_column"]
     problem_type = log.get("problem_type") or dataset.problem_type
 
-    df = load_dataframe(download_file(dataset.storage_key), dataset.content_type, dataset.filename)
+    # The sheet this model was trained on (older models predate sheet choice: first sheet)
+    df = load_dataframe(download_file(dataset.storage_key), dataset.content_type, dataset.filename, log.get("sheet"))
     if target not in df.columns:
         raise HTTPException(status_code=400, detail="This file no longer matches the model. Please rebuild the model.")
 

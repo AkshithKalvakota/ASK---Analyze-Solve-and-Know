@@ -2,17 +2,31 @@ import pandas as pd
 import numpy as np
 from io import BytesIO
 
-def load_dataframe(file_bytes: bytes, content_type: str, filename: str | None = None) -> pd.DataFrame:
+def _is_csv(content_type: str, filename: str | None) -> bool:
     # Trust the file extension first: browsers report MIME types inconsistently
     # (some Windows machines with Excel installed send .csv as application/vnd.ms-excel)
     name = (filename or "").lower()
     if name.endswith(".csv"):
-        return pd.read_csv(BytesIO(file_bytes))
+        return True
     if name.endswith((".xlsx", ".xls")):
-        return pd.read_excel(BytesIO(file_bytes))
-    if content_type == "text/csv":
+        return False
+    return content_type == "text/csv"
+
+
+def load_dataframe(
+    file_bytes: bytes, content_type: str, filename: str | None = None, sheet_name: str | None = None
+) -> pd.DataFrame:
+    if _is_csv(content_type, filename):
         return pd.read_csv(BytesIO(file_bytes))
-    return pd.read_excel(BytesIO(file_bytes))
+    # Excel: the chosen sheet, or the first one when none has been chosen
+    return pd.read_excel(BytesIO(file_bytes), sheet_name=sheet_name if sheet_name is not None else 0)
+
+
+def excel_sheet_names(file_bytes: bytes, content_type: str, filename: str | None = None) -> list[str]:
+    """Sheet names of an Excel file in workbook order; an empty list for CSV files."""
+    if _is_csv(content_type, filename):
+        return []
+    return [str(name) for name in pd.ExcelFile(BytesIO(file_bytes)).sheet_names]
 
 def profile_dataset(df: pd.DataFrame) -> dict:
     n_rows, n_cols = df.shape
@@ -52,7 +66,9 @@ def profile_dataset(df: pd.DataFrame) -> dict:
     correlation = {}
     if len(numeric_cols) >= 2:
         corr_matrix = df[numeric_cols].corr(numeric_only=True).round(2)
-        correlation = corr_matrix.to_dict()
+        # A constant column has no correlation (NaN), and Postgres JSONB rejects NaN,
+        # which made saving the whole profile fail; store it as null instead
+        correlation = corr_matrix.astype(object).where(corr_matrix.notna(), None).to_dict()
 
     # --- Quality score: start at 100, deduct for issues ---
     score = 100.0

@@ -101,6 +101,49 @@ function checkTarget(column: string, profile: NonNullable<Dataset['profile_resul
   return null
 }
 
+type ColumnReview = { reason: string; exclude: boolean }
+
+// A note for columns worth a second look before building, shown next to each checkbox.
+// Left out by default (exclude): ones that can't help (constant, ID-like, too many text
+// values) and near-exact copies of the target (stored correlation 1.00, e.g.
+// price_with_tax when predicting price). A merely strong correlation (0.95-0.99) stays
+// ticked with a note: a genuinely strong predictor like area also correlates highly,
+// and leakage depends on whether the value is known before the answer, which only the
+// user can judge.
+function reviewColumns(target: string, profile: NonNullable<Dataset['profile_result']>): Record<string, ColumnReview> {
+  const reviews: Record<string, ColumnReview> = {}
+  const columns = profile.columns ?? Object.keys(profile.dtypes)
+  const targetCorrelation = (profile.correlation ?? {})[target] as Record<string, number | null> | undefined
+  const name = target.trim()
+
+  for (const col of columns) {
+    if (col === target) continue
+    const unique = profile.unique_counts?.[col]
+    const dtype = profile.dtypes[col] ?? ''
+    const isText = !/int|float|bool/.test(dtype)
+    const r = targetCorrelation?.[col]
+
+    if (unique !== undefined && unique <= 1) {
+      reviews[col] = { exclude: true, reason: 'Same value in every row, so it tells the model nothing' }
+    } else if (unique !== undefined && unique === profile.n_rows && (isText || /int/.test(dtype))) {
+      reviews[col] = { exclude: true, reason: 'Looks like an ID or a name: every row is different' }
+    } else if (unique !== undefined && isText && unique > 20) {
+      reviews[col] = { exclude: true, reason: `${unique} different text values, too many to learn from (ASK would skip it anyway)` }
+    } else if (typeof r === 'number' && Math.abs(r) >= 0.995) {
+      reviews[col] = {
+        exclude: true,
+        reason: `Moves exactly with ${name} (correlation ${r.toFixed(2)}), so it's probably calculated from it and would give the answer away`,
+      }
+    } else if (typeof r === 'number' && Math.abs(r) >= 0.95) {
+      reviews[col] = {
+        exclude: false,
+        reason: `Very closely linked to ${name} (correlation ${r.toFixed(2)}). Fine if it's known before the ${name} is; untick it if it's worked out from the ${name}`,
+      }
+    }
+  }
+  return reviews
+}
+
 // If one card fails to render (e.g. unexpected data from an old model), show a
 // message in its place instead of blanking the whole dashboard
 class CardErrorBoundary extends Component<{ children: ReactNode }, { failed: boolean }> {
@@ -156,8 +199,8 @@ function DataSummary({ profile }: { profile: NonNullable<Dataset['profile_result
   const duplicates: number = profile.duplicate_count ?? 0
   const missingPct: number = profile.missing_pct_total ?? 0
   const facts = [
-    `${profile.n_rows.toLocaleString()} rows`,
-    `${profile.n_columns} columns`,
+    `${profile.n_rows.toLocaleString()} ${profile.n_rows === 1 ? 'row' : 'rows'}`,
+    `${profile.n_columns} ${profile.n_columns === 1 ? 'column' : 'columns'}`,
     missingPct > 0 ? `${missingPct}% of cells empty` : 'no empty cells',
     duplicates > 0 ? `${duplicates} duplicate ${duplicates === 1 ? 'row' : 'rows'}` : 'no duplicate rows',
     `${outliers.toLocaleString()} unusual ${outliers === 1 ? 'value' : 'values'}`,
@@ -240,6 +283,12 @@ function ModelSummary({ model, target }: { model: TrainedModel; target: string }
           <p className="text-[#8A93A6]">
             F1 {model.metrics.f1.toFixed(2)}: balances catching the real cases with avoiding false alarms, so it isn't
             fooled when one {target} value is rare.
+          </p>
+        )}
+        {score >= 0.99 && (
+          <p className="text-xs text-[#E8B04B] pt-1">
+            ⚠️ Almost perfect scores are rare with real data. Check that no column is worked out from {target} itself
+            (open “Columns the model can learn from” above), or the model will fail on new data.
           </p>
         )}
       </div>
@@ -604,11 +653,15 @@ function DatasetModels({
   })
 
   const trainMutation = useMutation({
-    mutationFn: () => trainModel(projectId, dataset.id),
+    mutationFn: (excludeColumns: string[]) => trainModel(projectId, dataset.id, excludeColumns),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['models', dataset.id] })
     },
   })
+
+  // The user's own column choice, remembered only for the target + latest model it
+  // was made for, so it resets when either changes
+  const [columnChoice, setColumnChoice] = useState<{ key: string; excluded: string[] } | null>(null)
 
   const now = useNow(trainMutation.isPending)
   const elapsed = Math.max(0, Math.round((now - trainMutation.submittedAt) / 1000))
@@ -618,11 +671,67 @@ function DatasetModels({
   const target = dataset.target_column.trim()
   const blocked = targetCheck?.level === 'block'
 
+  // Which columns the model may learn from: the latest model's choice if it predicts
+  // the current target, otherwise ASK's suggestions (risky columns unticked)
+  const profile = dataset.profile_result
+  const latest = models?.[0]
+  const reviews = profile ? reviewColumns(dataset.target_column, profile) : {}
+  const featureColumns = profile
+    ? (profile.columns ?? Object.keys(profile.dtypes)).filter((c) => c !== dataset.target_column)
+    : []
+  const latestIsCurrent = !!latest && latest.target_column === dataset.target_column
+  const choiceKey = `${dataset.target_column}|${latest?.id ?? ''}`
+  const suggestedExclusions = Object.keys(reviews).filter((col) => reviews[col].exclude)
+  const defaultExcluded = latestIsCurrent ? latest.excluded_columns ?? [] : suggestedExclusions
+  const excluded = columnChoice?.key === choiceKey ? columnChoice.excluded : defaultExcluded
+  const usedCount = featureColumns.filter((c) => !excluded.includes(c)).length
+  const sameColumns = (a: string[], b: string[]) => a.length === b.length && a.every((c) => b.includes(c))
+  const columnsChanged = latestIsCurrent && !sameColumns(excluded, latest.excluded_columns ?? [])
+
+  function toggleColumn(col: string) {
+    const next = excluded.includes(col) ? excluded.filter((c) => c !== col) : [...excluded, col]
+    setColumnChoice({ key: choiceKey, excluded: next })
+  }
+
   return (
     <div className="mt-3">
+      {featureColumns.length > 0 && (
+        <details open={!models?.length} className="mb-3 bg-[#121A2B] border border-[#2A3550] rounded-md px-3 py-2">
+          <summary className="text-xs text-[#EDEEF2] cursor-pointer">
+            Columns the model can learn from: {usedCount} of {featureColumns.length}
+            {excluded.length > 0 && <span className="text-[#8A93A6]"> · {excluded.length} left out</span>}
+          </summary>
+          <p className="text-[10px] text-[#8A93A6] mt-2">
+            Untick anything the model shouldn't see: IDs, names, or anything worked out from the answer
+            itself. ASK has already unticked the obvious ones and added notes to others worth a look.
+          </p>
+          <div className="mt-2 grid sm:grid-cols-2 gap-x-4 gap-y-1.5">
+            {featureColumns.map((col) => (
+              <label key={col} className="flex items-start gap-2 text-xs cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={!excluded.includes(col)}
+                  onChange={() => toggleColumn(col)}
+                  className="mt-0.5 accent-[#4FD1C5]"
+                />
+                <span>
+                  <span className="text-[#EDEEF2]">{col}</span>
+                  {reviews[col] && (
+                    <span className={`block text-[10px] ${reviews[col].exclude ? 'text-[#E8B04B]' : 'text-[#8A93A6]'}`}>
+                      {reviews[col].exclude ? '' : 'Note: '}
+                      {reviews[col].reason}
+                    </span>
+                  )}
+                </span>
+              </label>
+            ))}
+          </div>
+        </details>
+      )}
+
       <button
-        onClick={() => trainMutation.mutate()}
-        disabled={trainMutation.isPending || blocked}
+        onClick={() => trainMutation.mutate(excluded)}
+        disabled={trainMutation.isPending || blocked || usedCount === 0}
         className="text-sm font-semibold bg-[#4FD1C5] text-[#0B1220] hover:brightness-110 px-4 py-2 rounded-md transition disabled:opacity-50"
       >
         {trainMutation.isPending ? `Building your model... ${elapsed}s` : models?.length ? 'Rebuild my model' : 'Build my model'}
@@ -630,8 +739,14 @@ function DatasetModels({
       {trainMutation.isPending && (
         <p className="text-xs text-[#8A93A6] mt-1">Cleaning the data, trying 3 methods and keeping the best. Usually 5–30 seconds.</p>
       )}
-      {!trainMutation.isPending && !models?.length && !blocked && (
+      {!trainMutation.isPending && usedCount === 0 && (
+        <p className="text-xs text-[#E85D5D] mt-1">Tick at least one column for the model to learn from.</p>
+      )}
+      {!trainMutation.isPending && !models?.length && !blocked && usedCount > 0 && (
         <p className="text-xs text-[#8A93A6] mt-1">Next: build a model that predicts {target}.</p>
+      )}
+      {!trainMutation.isPending && columnsChanged && (
+        <p className="text-xs text-[#E8B04B] mt-1">You changed the columns. Press “Rebuild my model” to use them.</p>
       )}
 
       {trainMutation.isError && (
@@ -677,7 +792,9 @@ function ProjectDatasets({ projectId }: { projectId: string }) {
   })
 
   const profileMutation = useMutation({
-    mutationFn: (datasetId: string) => profileDataset(projectId, datasetId),
+    // `sheet` switches an Excel file to another sheet; without it the current one is re-checked
+    mutationFn: ({ datasetId, sheet }: { datasetId: string; sheet?: string }) =>
+      profileDataset(projectId, datasetId, sheet),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['datasets', projectId] })
     },
@@ -688,7 +805,7 @@ function ProjectDatasets({ projectId }: { projectId: string }) {
     mutationFn: (file: File) => uploadDataset(projectId, file),
     onSuccess: (dataset) => {
       queryClient.invalidateQueries({ queryKey: ['datasets', projectId] })
-      profileMutation.mutate(dataset.id)
+      profileMutation.mutate({ datasetId: dataset.id })
     },
   })
 
@@ -740,8 +857,9 @@ function ProjectDatasets({ projectId }: { projectId: string }) {
       {datasets && datasets.length > 0 && (
         <ul className="mt-3 space-y-3">
           {datasets.map((d) => {
-            const checking = profileMutation.isPending && profileMutation.variables === d.id
-            const checkFailed = profileMutation.isError && profileMutation.variables === d.id
+            const checking = profileMutation.isPending && profileMutation.variables?.datasetId === d.id
+            const checkFailed = profileMutation.isError && profileMutation.variables?.datasetId === d.id
+            const sheets = d.profile_result?.sheets ?? []
             const settingTarget = targetMutation.isPending && targetMutation.variables?.datasetId === d.id
             const targetFailed = targetMutation.isError && targetMutation.variables?.datasetId === d.id
             const columns = d.profile_result?.columns ?? Object.keys(d.profile_result?.dtypes ?? {})
@@ -754,7 +872,7 @@ function ProjectDatasets({ projectId }: { projectId: string }) {
                   <span className="text-sm text-[#EDEEF2] truncate">📄 {d.filename}</span>
                   <div className="flex gap-2 shrink-0">
                     <button
-                      onClick={() => profileMutation.mutate(d.id)}
+                      onClick={() => profileMutation.mutate({ datasetId: d.id })}
                       disabled={checking}
                       className="text-xs bg-[#121A2B] border border-[#2A3550] hover:border-[#4FD1C5] text-[#EDEEF2] px-3 py-1.5 rounded transition"
                     >
@@ -785,6 +903,26 @@ function ProjectDatasets({ projectId }: { projectId: string }) {
                 )}
 
                 {d.profile_result && <DataSummary profile={d.profile_result} />}
+
+                {sheets.length > 1 && (
+                  <div className="mt-3">
+                    <label htmlFor={`${d.id}-sheet`} className="block text-xs text-[#8A93A6] mb-1">
+                      This workbook has {sheets.length} sheets. Which one holds your data?
+                    </label>
+                    <select
+                      id={`${d.id}-sheet`}
+                      value={d.profile_result?.sheet ?? sheets[0]}
+                      disabled={checking}
+                      onChange={(e) => profileMutation.mutate({ datasetId: d.id, sheet: e.target.value })}
+                      className="bg-[#121A2B] border-2 border-[#4FD1C5]/40 rounded-md px-3 py-2 text-sm text-[#EDEEF2] focus:border-[#4FD1C5] transition"
+                    >
+                      {sheets.map((name) => (
+                        <option key={name} value={name}>{name}</option>
+                      ))}
+                    </select>
+                    <p className="text-[10px] text-[#8A93A6] mt-1">Switching sheets checks the data again and clears the column to predict.</p>
+                  </div>
+                )}
 
                 {d.profile_result && (
                   <div className="mt-4">
