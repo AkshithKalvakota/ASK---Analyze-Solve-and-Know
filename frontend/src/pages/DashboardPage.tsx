@@ -18,10 +18,12 @@ import {
   predict,
   fetchFeatureImportance,
   explainPrediction,
+  fetchSampleRow,
   type Dataset,
   type InputField,
   type PredictionExplanation,
   type Project,
+  type SampleRow,
   type TrainedModel,
 } from '../lib/api'
 
@@ -39,8 +41,10 @@ function formatNumber(value: number) {
 // Same rule as the backend's explanation sentences: whole numbers for big amounts
 // (prices), one decimal for everyday sizes (MPa, ratings), two digits below 1
 function formatAmount(value: number) {
-  if (value >= 100) return Math.round(value).toLocaleString()
-  if (value >= 1) return value.toLocaleString(undefined, { maximumFractionDigits: 1 })
+  const size = Math.abs(value)
+  if (size === 0) return '0'
+  if (size >= 100) return Math.round(value).toLocaleString()
+  if (size >= 1) return value.toLocaleString(undefined, { maximumFractionDigits: 1 })
   return value.toPrecision(2)
 }
 
@@ -62,6 +66,39 @@ function friendlyFeature(feature: string, fields: InputField[] = []) {
     }
   }
   return feature
+}
+
+type TargetCheck = { level: 'block' | 'warn'; message: string }
+
+// Spot target columns that can't sensibly be predicted, using the stored profile.
+// Datasets profiled before unique_counts existed simply get no check.
+function checkTarget(column: string, profile: NonNullable<Dataset['profile_result']>): TargetCheck | null {
+  const unique = profile.unique_counts?.[column]
+  if (unique === undefined) return null
+  const rows = profile.n_rows
+  const dtype = profile.dtypes[column] ?? ''
+  const isText = !/int|float|bool/.test(dtype)
+  const missing: number = profile.missing_by_column?.[column]?.missing_count ?? 0
+
+  if (unique <= 1) {
+    return { level: 'block', message: 'Every row has the same value here, so there is nothing to predict. Choose another column.' }
+  }
+  if (isText && unique > 20 && unique > rows / 2) {
+    return {
+      level: 'block',
+      message: `Almost every row has a different value (${unique.toLocaleString()} of ${rows.toLocaleString()}), like a name or an ID. A model can't learn categories from that. Choose another column.`,
+    }
+  }
+  if (/int/.test(dtype) && unique === rows) {
+    return { level: 'warn', message: 'Every row has a different whole number here. If this is an ID or a row number, the model will learn nothing useful.' }
+  }
+  if (isText && unique > 20) {
+    return { level: 'warn', message: `This column has ${unique} different values. Categories that appear only once or twice can't be learned, so building may fail.` }
+  }
+  if (missing > 0) {
+    return { level: 'warn', message: `${missing.toLocaleString()} ${missing === 1 ? 'row has' : 'rows have'} no value in this column. ASK will leave ${missing === 1 ? 'it' : 'them'} out when building the model.` }
+  }
+  return null
 }
 
 // Ticks once a second while `active`, for elapsed-time and slow-loading messages
@@ -132,7 +169,7 @@ function MetricsDisplay({ metrics }: { metrics: Record<string, number> }) {
 
   return (
     <div className="grid grid-cols-3 gap-2 mt-3">
-      {Object.entries(metrics).map(([key, value]) => (
+      {Object.entries(metrics).filter(([key]) => key in labels).map(([key, value]) => (
         <div key={key} className="bg-[#0B1220] border border-[#2A3550] rounded p-2 text-center">
           <p className="text-[10px] text-[#8A93A6] uppercase tracking-wide">{labels[key] ?? key}</p>
           <p className="font-mono text-sm font-semibold text-[#4FD1C5] mt-1">
@@ -244,16 +281,63 @@ function FeatureImportanceDisplay({
   )
 }
 
+// Shown after predicting a real row: the true value from the file next to the prediction
+function RealRowCheck({
+  actual,
+  predicted,
+  rowNumber,
+  isCategory,
+}: {
+  actual: SampleRow['actual']
+  predicted: string | number
+  rowNumber: number
+  isCategory: boolean // category answers (even numbers like a 1-5 rating) are right or wrong, not "off by"
+}) {
+  let verdict: React.ReactNode
+  if (actual === null) {
+    verdict = <p className="text-[#8A93A6]">Row {rowNumber} of your file has no real value to compare with.</p>
+  } else if (!isCategory && typeof actual === 'number' && typeof predicted === 'number') {
+    const off = Math.abs(predicted - actual)
+    const pct = actual !== 0 ? Math.round((off / Math.abs(actual)) * 100) : null
+    verdict = (
+      <>
+        <p>
+          Real value in row {rowNumber} of your file: <span className="font-mono font-semibold text-[#EDEEF2]">{formatNumber(actual)}</span>
+        </p>
+        <p className="text-[#8A93A6] mt-0.5">The model was off by {formatAmount(off)}{pct !== null ? ` (${pct}%)` : ''}.</p>
+      </>
+    )
+  } else {
+    const right = String(actual) === String(predicted)
+    verdict = (
+      <p>
+        Real value in row {rowNumber} of your file: <span className="font-semibold text-[#EDEEF2]">{String(actual)}</span>{' '}
+        <span className={right ? 'text-[#4FD1C5]' : 'text-[#E85D5D]'}>
+          {right ? '✓ The model got this one right.' : `✗ The model said ${String(predicted)}.`}
+        </span>
+      </p>
+    )
+  }
+  return (
+    <div className="mt-3 pt-3 border-t border-[#2A3550] text-xs text-left">
+      {verdict}
+      <p className="text-[10px] text-[#8A93A6] mt-1">This row was hidden from the model while it learned, so it's a fair test.</p>
+    </div>
+  )
+}
+
 function PredictionForm({
   projectId,
   datasetId,
   modelId,
   target,
+  metrics,
 }: {
   projectId: string
   datasetId: string
   modelId: string
   target: string
+  metrics: Record<string, number> // the model's own scores: R² means it predicts numbers
 }) {
   const [values, setValues] = useState<Record<string, string>>({})
   const [result, setResult] = useState<string | number | null>(null)
@@ -295,8 +379,26 @@ function PredictionForm({
     },
   })
 
+  // "Try a real row": fill the form from a row the model never saw, predict it,
+  // and show the true value next to the prediction
+  const [realRow, setRealRow] = useState<{ actual: SampleRow['actual']; rowNumber: number } | null>(null)
+  const sampleRowMutation = useMutation({
+    mutationFn: () => fetchSampleRow(projectId, datasetId, modelId),
+    onSuccess: (row) => {
+      const filled: Record<string, string> = {}
+      for (const [name, value] of Object.entries(row.values)) filled[name] = value === null ? '' : String(value)
+      setValues(filled)
+      setRealRow({ actual: row.actual, rowNumber: row.row_number })
+      setResult(null)
+      setPreviousResult(null)
+      setExplanation(null)
+      predictMutation.mutate(filled)
+    },
+  })
+
   function handleChange(fieldName: string, value: string) {
     setValues((prev) => ({ ...prev, [fieldName]: value }))
+    setRealRow(null) // edited inputs no longer match the real row's true value
   }
 
   function handleSubmit(e: React.FormEvent) {
@@ -310,6 +412,9 @@ function PredictionForm({
   const changed = previousResult !== null && result !== null && previousResult !== result
   const numericChange =
     changed && typeof result === 'number' && typeof previousResult === 'number' ? result - previousResult : null
+  // Typical miss on the hidden test rows (models trained before this was saved have none)
+  const typicalMiss = metrics.error_p50
+  const largeMiss = metrics.error_p90
 
   return (
     <form onSubmit={handleSubmit} className="mt-5 bg-[#0B1220] border border-[#2A3550] rounded-lg p-4">
@@ -362,17 +467,32 @@ function PredictionForm({
           )
         })}
       </div>
-      <button
-        type="submit"
-        disabled={predictMutation.isPending}
-        className="mt-4 text-sm font-semibold bg-[#E8B04B] text-[#0B1220] hover:brightness-110 px-5 py-2.5 rounded-md disabled:opacity-50 transition"
-      >
-        {predictMutation.isPending ? 'Predicting...' : result === null ? `Predict ${target}` : 'Update prediction'}
-      </button>
+      <div className="mt-4 flex flex-wrap items-center gap-3">
+        <button
+          type="submit"
+          disabled={predictMutation.isPending}
+          className="text-sm font-semibold bg-[#E8B04B] text-[#0B1220] hover:brightness-110 px-5 py-2.5 rounded-md disabled:opacity-50 transition"
+        >
+          {predictMutation.isPending ? 'Predicting...' : result === null ? `Predict ${target}` : 'Update prediction'}
+        </button>
+        <button
+          type="button"
+          onClick={() => sampleRowMutation.mutate()}
+          disabled={sampleRowMutation.isPending || predictMutation.isPending}
+          className="text-sm bg-[#121A2B] border-2 border-[#4FD1C5]/50 hover:border-[#4FD1C5] text-[#EDEEF2] px-4 py-2 rounded-md transition disabled:opacity-50"
+        >
+          {sampleRowMutation.isPending ? 'Picking a row...' : '🎲 Try a real row from my data'}
+        </button>
+      </div>
 
       {predictMutation.isError && (
         <p className="text-[#E85D5D] text-xs mt-2">
           {errorMessage(predictMutation.error, 'Prediction failed. Please check the values and try again.')}
+        </p>
+      )}
+      {sampleRowMutation.isError && (
+        <p className="text-[#E85D5D] text-xs mt-2">
+          {errorMessage(sampleRowMutation.error, "Couldn't pick a row from your file. Please try again.")}
         </p>
       )}
 
@@ -395,6 +515,22 @@ function PredictionForm({
             </p>
           )}
           <p className="text-[10px] text-[#8A93A6] mt-1 tracking-wide uppercase">Predicted {target}</p>
+          {typeof result === 'number' && typicalMiss != null && largeMiss != null && (
+            <p className="text-xs text-[#8A93A6] mt-2">
+              Likely between {formatAmount(result - typicalMiss)} and {formatAmount(result + typicalMiss)}.
+              <span className="block text-[10px] mt-0.5">
+                Half of the model's test predictions were this close; 9 in 10 were within ±{formatAmount(largeMiss)}.
+              </span>
+            </p>
+          )}
+          {realRow && (
+            <RealRowCheck
+              actual={realRow.actual}
+              predicted={result}
+              rowNumber={realRow.rowNumber}
+              isCategory={!('r2' in metrics)}
+            />
+          )}
         </div>
       )}
 
@@ -423,7 +559,15 @@ function PredictionForm({
   )
 }
 
-function DatasetModels({ projectId, dataset }: { projectId: string; dataset: Dataset }) {
+function DatasetModels({
+  projectId,
+  dataset,
+  targetCheck,
+}: {
+  projectId: string
+  dataset: Dataset
+  targetCheck: TargetCheck | null
+}) {
   const queryClient = useQueryClient()
 
   const { data: models } = useQuery({
@@ -445,12 +589,13 @@ function DatasetModels({ projectId, dataset }: { projectId: string; dataset: Dat
   if (!dataset.target_column) return null
   // Spreadsheet headers often carry stray spaces ("strength(MPa) "); trim for display only
   const target = dataset.target_column.trim()
+  const blocked = targetCheck?.level === 'block'
 
   return (
     <div className="mt-3">
       <button
         onClick={() => trainMutation.mutate()}
-        disabled={trainMutation.isPending}
+        disabled={trainMutation.isPending || blocked}
         className="text-sm font-semibold bg-[#4FD1C5] text-[#0B1220] hover:brightness-110 px-4 py-2 rounded-md transition disabled:opacity-50"
       >
         {trainMutation.isPending ? `Building your model... ${elapsed}s` : models?.length ? 'Rebuild my model' : 'Build my model'}
@@ -458,7 +603,7 @@ function DatasetModels({ projectId, dataset }: { projectId: string; dataset: Dat
       {trainMutation.isPending && (
         <p className="text-xs text-[#8A93A6] mt-1">Cleaning the data, trying 3 methods and keeping the best. Usually 5–30 seconds.</p>
       )}
-      {!trainMutation.isPending && !models?.length && (
+      {!trainMutation.isPending && !models?.length && !blocked && (
         <p className="text-xs text-[#8A93A6] mt-1">Next: build a model that predicts {target}.</p>
       )}
 
@@ -474,7 +619,7 @@ function DatasetModels({ projectId, dataset }: { projectId: string; dataset: Dat
             <div key={m.id} className="bg-[#1A2436] border border-[#2A3550] rounded-lg p-4">
               <ModelSummary model={m} problemType={dataset.problem_type ?? ''} target={target} />
               <FeatureImportanceDisplay projectId={projectId} datasetId={dataset.id} modelId={m.id} />
-              <PredictionForm projectId={projectId} datasetId={dataset.id} modelId={m.id} target={target} />
+              <PredictionForm projectId={projectId} datasetId={dataset.id} modelId={m.id} target={target} metrics={m.metrics} />
             </div>
           ))}
         </div>
@@ -561,6 +706,7 @@ function ProjectDatasets({ projectId }: { projectId: string }) {
             const targetFailed = targetMutation.isError && targetMutation.variables?.datasetId === d.id
             const columns = d.profile_result?.columns ?? Object.keys(d.profile_result?.dtypes ?? {})
             const selectId = `${d.id}-target`
+            const targetCheck = d.profile_result && d.target_column ? checkTarget(d.target_column, d.profile_result) : null
 
             return (
               <li key={d.id} className="bg-[#0B1220] border border-[#2A3550] rounded-lg p-4 hover:border-[#4FD1C5]/40 transition-colors">
@@ -615,7 +761,10 @@ function ProjectDatasets({ projectId }: { projectId: string }) {
                       >
                         <option value="" disabled>Choose a column</option>
                         {columns.map((col) => (
-                          <option key={col} value={col}>{col}</option>
+                          <option key={col} value={col}>
+                            {col}
+                            {checkTarget(col, d.profile_result!)?.level === 'block' ? " (can't be predicted)" : ''}
+                          </option>
                         ))}
                       </select>
                       {settingTarget && <span className="text-xs text-[#8A93A6]">Looking at this column...</span>}
@@ -630,10 +779,22 @@ function ProjectDatasets({ projectId }: { projectId: string }) {
                         {errorMessage(targetMutation.error, "Couldn't use that column. Please try another one.")}
                       </p>
                     )}
+                    {!settingTarget && targetCheck && (
+                      <p
+                        className={`text-xs mt-2 rounded-md px-3 py-2 border ${
+                          targetCheck.level === 'block'
+                            ? 'text-[#E85D5D] bg-[#2A1418] border-[#E85D5D]/40'
+                            : 'text-[#E8B04B] bg-[#2A2414] border-[#E8B04B]/40'
+                        }`}
+                      >
+                        {targetCheck.level === 'block' ? '⛔ ' : '⚠️ '}
+                        {targetCheck.message}
+                      </p>
+                    )}
                   </div>
                 )}
 
-                <DatasetModels projectId={projectId} dataset={d} />
+                <DatasetModels projectId={projectId} dataset={d} targetCheck={targetCheck} />
               </li>
             )
           })}
@@ -677,6 +838,37 @@ export default function DashboardPage() {
     },
   })
 
+  // "Try it with sample data": run the whole flow on the bundled insurance file
+  // using the normal API calls, telling the user which step is running
+  const [sampleStep, setSampleStep] = useState<string | null>(null)
+  const sampleMutation = useMutation({
+    mutationFn: async () => {
+      setSampleStep('Creating a sample project...')
+      const project = await createProject('Sample: insurance charges')
+      queryClient.invalidateQueries({ queryKey: ['projects'] })
+
+      setSampleStep('Uploading insurance.csv (1,338 people)...')
+      const response = await fetch('/samples/insurance.csv')
+      if (!response.ok) throw new Error('Sample file missing')
+      const file = new File([await response.blob()], 'insurance.csv', { type: 'text/csv' })
+      const dataset = await uploadDataset(project.id, file)
+
+      setSampleStep('Checking the data...')
+      await profileDataset(project.id, dataset.id)
+      setSampleStep('Choosing what to predict: charges...')
+      await setTargetColumn(project.id, dataset.id, 'charges')
+      setSampleStep('Building the model (trying 3 methods, about 10 seconds)...')
+      await trainModel(project.id, dataset.id)
+      return { project, dataset }
+    },
+    onSuccess: ({ project, dataset }) => {
+      queryClient.invalidateQueries({ queryKey: ['datasets', project.id] })
+      queryClient.invalidateQueries({ queryKey: ['models', dataset.id] })
+      setTimeout(() => document.getElementById(`project-${project.id}`)?.scrollIntoView({ behavior: 'smooth' }), 400)
+    },
+    onSettled: () => setSampleStep(null),
+  })
+
   function handleCreate(e: React.FormEvent) {
     e.preventDefault()
     if (newProjectName.trim()) createMutation.mutate(newProjectName.trim())
@@ -699,7 +891,7 @@ export default function DashboardPage() {
       </header>
 
       <main className="p-6 md:p-10 max-w-5xl mx-auto w-full">
-        <form onSubmit={handleCreate} className="flex gap-2 mb-8">
+        <form onSubmit={handleCreate} className="flex gap-2">
           <label htmlFor="new-project-name" className="sr-only">New project name</label>
           <input
             id="new-project-name"
@@ -717,6 +909,24 @@ export default function DashboardPage() {
             {createMutation.isPending ? 'Creating...' : 'Create'}
           </button>
         </form>
+        <div className="mt-3 mb-8 flex flex-wrap items-center gap-x-3 gap-y-1">
+          <button
+            type="button"
+            onClick={() => sampleMutation.mutate()}
+            disabled={sampleMutation.isPending}
+            className="text-sm font-semibold text-[#4FD1C5] hover:underline disabled:opacity-60 disabled:no-underline"
+          >
+            ✨ Try it with sample data
+          </button>
+          <span className="text-xs text-[#8A93A6]">
+            {sampleStep ?? 'Loads 1,338 insurance records and builds a model that predicts medical charges.'}
+          </span>
+          {sampleMutation.isError && (
+            <p className="basis-full text-xs text-[#E85D5D]">
+              {errorMessage(sampleMutation.error, "The sample didn't finish. Please try again.")}
+            </p>
+          )}
+        </div>
 
         {isLoading && (
           <div className="text-[#8A93A6]">
@@ -732,7 +942,7 @@ export default function DashboardPage() {
 
         <ul className="space-y-4">
           {projects?.map((project) => (
-            <li key={project.id} className="bg-[#121A2B] border border-[#1A2436] rounded-xl px-6 py-5 shadow-sm hover:border-[#2A3550] transition-colors">
+            <li key={project.id} id={`project-${project.id}`} className="bg-[#121A2B] border border-[#1A2436] rounded-xl px-6 py-5 shadow-sm hover:border-[#2A3550] transition-colors">
               <div className="flex justify-between items-center">
                 <span className="font-[Space_Grotesk] font-semibold text-lg">{project.name}</span>
                 <button
@@ -752,6 +962,15 @@ export default function DashboardPage() {
           <div className="text-center mt-12 text-[#8A93A6]">
             <p>No projects yet.</p>
             <p className="text-sm mt-1">Give your first project a name above, then upload a spreadsheet to get started.</p>
+            <p className="text-sm mt-4">New here? See the whole thing work in about 20 seconds:</p>
+            <button
+              type="button"
+              onClick={() => sampleMutation.mutate()}
+              disabled={sampleMutation.isPending}
+              className="mt-2 bg-[#E8B04B] text-[#0B1220] font-semibold px-5 py-2.5 rounded-md hover:brightness-110 transition disabled:opacity-50"
+            >
+              {sampleMutation.isPending ? 'Setting up the sample...' : '✨ Try it with sample data'}
+            </button>
           </div>
         )}
       </main>

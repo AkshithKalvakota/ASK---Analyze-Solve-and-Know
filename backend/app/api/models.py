@@ -6,7 +6,9 @@ from pydantic import BaseModel
 from typing import Any
 import joblib
 from io import BytesIO
+import numpy as np
 import pandas as pd
+from sklearn.model_selection import train_test_split
 
 from app.db.session import SessionLocal
 from app.models.dataset import Dataset
@@ -56,7 +58,7 @@ def train_model(
     file_bytes = download_file(dataset.storage_key)
     df = load_dataframe(file_bytes, dataset.content_type, dataset.filename)
 
-    X, y, preprocessing_log = preprocess(df, dataset.target_column)
+    X, y, preprocessing_log = preprocess(df, dataset.target_column, dataset.problem_type)
 
     try:
         result = train_and_select_best(X, y, dataset.problem_type)
@@ -173,6 +175,77 @@ def get_input_schema(
     dtypes = dataset.profile_result.get("dtypes", {})
     original_columns = [col for col in dtypes.keys() if col != dataset.target_column]
     return {"fields": [{"name": col, "type": "numeric", "categories": None} for col in original_columns]}
+
+
+def _json_value(value: Any) -> Any:
+    """A cell from the spreadsheet as a plain JSON value (NaN -> None, numpy -> Python)."""
+    if pd.isna(value):
+        return None
+    if isinstance(value, np.bool_):
+        return bool(value)
+    if isinstance(value, np.integer):
+        return int(value)
+    if isinstance(value, np.floating):
+        return float(value)
+    return value if isinstance(value, (bool, int, float, str)) else str(value)
+
+
+@router.get("/{model_id}/sample-row")
+def sample_row(
+    project_id: UUID,
+    dataset_id: UUID,
+    model_id: UUID,
+    db: Session = Depends(get_db),
+    user_id: str = Depends(get_current_user_id),
+):
+    """
+    A random real row from the rows the model never saw while training (the hidden
+    20% test split), with its true target value, so the user can compare actual vs
+    predicted on a fair example.
+    """
+    stmt = select(Project).where(Project.id == project_id, Project.user_id == user_id)
+    project = db.execute(stmt).scalar_one_or_none()
+    if not project:
+        raise HTTPException(status_code=404, detail="Project not found")
+
+    stmt = select(Dataset).where(Dataset.id == dataset_id, Dataset.project_id == project_id)
+    dataset = db.execute(stmt).scalar_one_or_none()
+    if not dataset:
+        raise HTTPException(status_code=404, detail="Dataset not found")
+
+    stmt = select(TrainedModel).where(
+        TrainedModel.id == model_id, TrainedModel.dataset_id == dataset_id
+    )
+    trained_model = db.execute(stmt).scalar_one_or_none()
+    if not trained_model:
+        raise HTTPException(status_code=404, detail="Model not found")
+
+    log = trained_model.preprocessing_log
+    target = log["target_column"]
+    problem_type = log.get("problem_type") or dataset.problem_type
+
+    df = load_dataframe(download_file(dataset.storage_key), dataset.content_type, dataset.filename)
+    if target not in df.columns:
+        raise HTTPException(status_code=400, detail="This file no longer matches the model. Please rebuild the model.")
+
+    # Same preprocessing and split as train_and_select_best, so the row really was
+    # hidden from the model (models trained before blank targets were dropped may
+    # split slightly differently)
+    X, y, _ = preprocess(df, target, problem_type)
+    _, X_test, _, _ = train_test_split(
+        X, y, test_size=0.2, random_state=42,
+        stratify=y if problem_type == "classification" else None,
+    )
+    row = df.loc[X_test.sample(1).index[0]]
+
+    field_names = [f["name"] for f in log.get("raw_feature_columns") or []] or [
+        c for c in df.columns if c != target
+    ]
+    return {
+        "values": {name: _json_value(row[name]) for name in field_names if name in df.columns},
+        "actual": _json_value(row[target]),
+        "row_number": int(row.name) + 2,  # spreadsheet row: data starts below the header row
+    }
 
 @router.get("/{model_id}/feature-importance")
 def feature_importance(

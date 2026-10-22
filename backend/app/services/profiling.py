@@ -75,6 +75,9 @@ def profile_dataset(df: pd.DataFrame) -> dict:
         "duplicate_count": duplicate_count,
         "duplicate_pct": duplicate_pct,
         "dtypes": dtypes,
+        # Distinct values per column, so the UI can warn about columns that can't
+        # be predicted (IDs, names, constant columns) before the user builds a model
+        "unique_counts": {col: int(df[col].nunique()) for col in df.columns},
         "outliers_by_column": outliers_by_column,
         "correlation": correlation,
     }

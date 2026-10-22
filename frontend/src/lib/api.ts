@@ -53,6 +53,7 @@ export interface Dataset {
   content_type: string
   profile_result?: {
     columns?: string[] // file order; missing on datasets profiled before it was added
+    unique_counts?: Record<string, number> // also missing on older profiles
     dtypes: Record<string, string>
     quality_score: number
     n_rows: number
@@ -150,6 +151,24 @@ export async function predict(
   const res = await api.post(
     `/projects/${projectId}/datasets/${datasetId}/models/${modelId}/predict`,
     { values }
+  )
+  return res.data
+}
+
+export interface SampleRow {
+  values: Record<string, string | number | boolean | null>
+  actual: string | number | boolean | null
+  row_number: number // as numbered in the spreadsheet (header is row 1)
+}
+
+// A real row the model never saw while training, with its true value
+export async function fetchSampleRow(
+  projectId: string,
+  datasetId: string,
+  modelId: string
+): Promise<SampleRow> {
+  const res = await api.get(
+    `/projects/${projectId}/datasets/${datasetId}/models/${modelId}/sample-row`
   )
   return res.data
 }

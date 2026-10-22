@@ -47,10 +47,16 @@ def train_and_select_best(X, y, problem_type: str) -> dict:
         trained_models[name] = model
 
         if problem_type == "regression":
+            errors = np.abs(np.asarray(y_test, dtype=float) - preds)
             results[name] = {
                 "r2": round(float(r2_score(y_test, preds)), 4),
                 "mae": round(float(mean_absolute_error(y_test, preds)), 4),
                 "rmse": round(float(np.sqrt(mean_squared_error(y_test, preds))), 4),
+                # Spread of the misses on the hidden test rows, used to show a likely
+                # range next to each prediction: half of the misses were smaller than
+                # error_p50, nine in ten smaller than error_p90
+                "error_p50": round(float(np.percentile(errors, 50)), 4),
+                "error_p90": round(float(np.percentile(errors, 90)), 4),
             }
         else:
             is_binary = len(np.unique(y)) == 2

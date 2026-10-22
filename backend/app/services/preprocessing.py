@@ -2,7 +2,9 @@ import re
 import pandas as pd
 from typing import Tuple, Any
 
-def preprocess(df: pd.DataFrame, target_column: str) -> Tuple[pd.DataFrame, pd.Series, dict]:
+def preprocess(
+    df: pd.DataFrame, target_column: str, problem_type: str | None = None
+) -> Tuple[pd.DataFrame, pd.Series, dict]:
     """
     Splits df into X (features) and y (target), handles missing values,
     and one-hot encodes categorical columns (dropping one category per
@@ -15,11 +17,21 @@ def preprocess(df: pd.DataFrame, target_column: str) -> Tuple[pd.DataFrame, pd.S
                             needed later to replay the same steps on new rows (what-if)
     """
     df = df.copy()
+
+    # Rows with no target value can't teach the model anything; before this, a
+    # blank target became a fake class (-1) or was filled with the median.
+    # Filtering keeps the original row index, which the sample-row endpoint relies on.
+    missing_target = int(df[target_column].isnull().sum())
+    if missing_target:
+        df = df[df[target_column].notnull()]
+
     y = df[target_column]
     X = df.drop(columns=[target_column])
 
     log: dict[str, Any] = {
         "target_column": target_column,
+        "problem_type": problem_type,
+        "dropped_rows_missing_target": missing_target,
         "imputation": {},
         "encoding": {},
         "feature_columns_after_encoding": [],
@@ -86,15 +98,23 @@ def preprocess(df: pd.DataFrame, target_column: str) -> Tuple[pd.DataFrame, pd.S
     X.columns = [re.sub(r"[\[\]<]", "_", str(c)) for c in X.columns]
     log["feature_columns_after_encoding"] = X.columns.tolist()
 
-    # --- Step 6: Handle target column for classification ---
-    if not pd.api.types.is_numeric_dtype(y):
+    # --- Step 6: Encode the target for classification. Number labels (e.g. a
+    # 1-5 rating) are encoded too: XGBoost requires classes numbered 0, 1, 2...
+    # and crashed on [1 2 3 4 5] before ---
+    if problem_type == "classification" or not pd.api.types.is_numeric_dtype(y):
         y = y.astype("category")
-        log["target_categories"] = y.cat.categories.tolist()
+        log["target_categories"] = [_label(c) for c in y.cat.categories.tolist()]
         y = y.cat.codes  # convert to integer codes for sklearn/XGBoost
-    else:
-        y = y.fillna(y.median())
 
     return X, y, log
+
+
+def _label(category):
+    """A class label as shown to users: 4 rather than 4.0 (a blank cell makes the
+    column float), text for anything that isn't a plain number (True, dates...)."""
+    if isinstance(category, bool) or not isinstance(category, (int, float)):
+        return str(category)
+    return int(category) if float(category).is_integer() else category
 
 
 def _numeric_field(name: str, series: pd.Series) -> dict:
