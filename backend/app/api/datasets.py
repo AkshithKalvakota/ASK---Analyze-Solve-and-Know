@@ -1,3 +1,5 @@
+import os
+
 from fastapi import APIRouter, Depends, UploadFile, File, HTTPException
 from sqlalchemy.orm import Session
 from sqlalchemy import select
@@ -29,6 +31,17 @@ ALLOWED_TYPES = {
     "application/vnd.ms-excel",
     "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
 }
+ALLOWED_EXTENSIONS = {".csv", ".xlsx", ".xls"}
+
+UNREADABLE_FILE = "We couldn't read this file. Please check it opens in Excel and is saved as .csv, .xlsx or .xls."
+
+
+def read_dataset_file(dataset: Dataset):
+    file_bytes = download_file(dataset.storage_key)
+    try:
+        return load_dataframe(file_bytes, dataset.content_type, dataset.filename)
+    except Exception:
+        raise HTTPException(status_code=400, detail=UNREADABLE_FILE)
 
 
 class TargetSelection(BaseModel):
@@ -54,14 +67,16 @@ def set_target_column(
     if not dataset:
         raise HTTPException(status_code=404, detail="Dataset not found")
 
+    if not dataset.profile_result:
+        raise HTTPException(status_code=400, detail="Please check the data before choosing what to predict.")
+
     if payload.target_column not in dataset.profile_result.get("dtypes", {}):
         raise HTTPException(status_code=400, detail="Column not found in dataset")
 
     if payload.problem_type_override:
         problem_type = payload.problem_type_override
     else:
-        file_bytes = download_file(dataset.storage_key)
-        df = load_dataframe(file_bytes, dataset.content_type)
+        df = read_dataset_file(dataset)
         problem_type = detect_problem_type(df, payload.target_column)
 
     dataset.target_column = payload.target_column
@@ -71,8 +86,10 @@ def set_target_column(
     return dataset
 
 
+# A plain def (not async): the B2 upload and database calls below are blocking,
+# so FastAPI runs this in a worker thread instead of freezing every other request
 @router.post("", response_model=DatasetOut)
-async def upload_dataset(
+def upload_dataset(
     project_id: UUID,
     file: UploadFile = File(...),
     db: Session = Depends(get_db),
@@ -83,10 +100,14 @@ async def upload_dataset(
     if not project:
         raise HTTPException(status_code=404, detail="Project not found")
 
-    if file.content_type not in ALLOWED_TYPES:
-        raise HTTPException(status_code=400, detail="File must be CSV or Excel")
+    extension = os.path.splitext(file.filename or "")[1].lower()
+    if extension not in ALLOWED_EXTENSIONS and file.content_type not in ALLOWED_TYPES:
+        raise HTTPException(
+            status_code=400,
+            detail="Please upload a spreadsheet saved as .csv, .xlsx or .xls.",
+        )
 
-    file_bytes = await file.read()
+    file_bytes = file.file.read()
     storage_key = f"{project_id}/{file.filename}"
     upload_file(file_bytes, storage_key, file.content_type)
 
@@ -154,8 +175,7 @@ def profile_dataset_endpoint(
     if not dataset:
         raise HTTPException(status_code=404, detail="Dataset not found")
 
-    file_bytes = download_file(dataset.storage_key)
-    df = load_dataframe(file_bytes, dataset.content_type)
+    df = read_dataset_file(dataset)
     result = profile_dataset(df)
 
     dataset.profile_result = result

@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
 import { SignInButton } from '@clerk/clerk-react'
+import { wakeServer } from '../lib/api'
 
 const QUESTION = 'What will this house sell for?'
 const ANSWER = '₹52,00,000 — driven mainly by area and number of bathrooms.'
@@ -70,6 +71,11 @@ function PipelineStep({ label, detail }: { label: string; detail: string }) {
 }
 
 export default function LandingPage() {
+  // Start waking the free backend now, so the dashboard loads faster after sign-in
+  useEffect(() => {
+    wakeServer()
+  }, [])
+
   return (
     <div className="min-h-screen bg-[#0B1220] text-[#EDEEF2] flex flex-col font-[Inter]">
       <header className="flex justify-between items-center px-6 md:px-10 py-6 border-b border-[#1A2436]">

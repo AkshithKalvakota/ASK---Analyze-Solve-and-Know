@@ -2,11 +2,17 @@ import pandas as pd
 import numpy as np
 from io import BytesIO
 
-def load_dataframe(file_bytes: bytes, content_type: str) -> pd.DataFrame:
+def load_dataframe(file_bytes: bytes, content_type: str, filename: str | None = None) -> pd.DataFrame:
+    # Trust the file extension first: browsers report MIME types inconsistently
+    # (some Windows machines with Excel installed send .csv as application/vnd.ms-excel)
+    name = (filename or "").lower()
+    if name.endswith(".csv"):
+        return pd.read_csv(BytesIO(file_bytes))
+    if name.endswith((".xlsx", ".xls")):
+        return pd.read_excel(BytesIO(file_bytes))
     if content_type == "text/csv":
         return pd.read_csv(BytesIO(file_bytes))
-    else:
-        return pd.read_excel(BytesIO(file_bytes))
+    return pd.read_excel(BytesIO(file_bytes))
 
 def profile_dataset(df: pd.DataFrame) -> dict:
     n_rows, n_cols = df.shape
@@ -58,6 +64,9 @@ def profile_dataset(df: pd.DataFrame) -> dict:
     score = max(round(score, 1), 0)
 
     return {
+        # Column names in file order: JSONB reorders dict keys (shortest first),
+        # so the frontend can't rely on the order of "dtypes"
+        "columns": [str(c) for c in df.columns],
         "n_rows": n_rows,
         "n_columns": n_cols,
         "quality_score": score,

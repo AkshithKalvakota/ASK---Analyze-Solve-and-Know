@@ -54,7 +54,7 @@ def train_model(
         raise HTTPException(status_code=400, detail="Target column not set for this dataset")
 
     file_bytes = download_file(dataset.storage_key)
-    df = load_dataframe(file_bytes, dataset.content_type)
+    df = load_dataframe(file_bytes, dataset.content_type, dataset.filename)
 
     X, y, preprocessing_log = preprocess(df, dataset.target_column)
 

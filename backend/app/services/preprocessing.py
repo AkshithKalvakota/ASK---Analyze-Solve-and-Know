@@ -47,11 +47,20 @@ def preprocess(df: pd.DataFrame, target_column: str) -> Tuple[pd.DataFrame, pd.S
         categorical_cols = [c for c in categorical_cols if c not in high_cardinality_cols]
 
     # --- Step 3: Record raw (pre-encoding) feature list, used by the frontend
-    # to build the input form (numeric input vs categorical dropdown) ---
+    # to build the input form (numeric input vs categorical dropdown), with a
+    # typical value to pre-fill each field and the range seen in training ---
     numeric_cols = [c for c in X.columns if c not in categorical_cols]
     log["raw_feature_columns"] = (
-        [{"name": c, "type": "numeric", "categories": None} for c in numeric_cols]
-        + [{"name": c, "type": "categorical", "categories": None} for c in categorical_cols]
+        [_numeric_field(c, X[c]) for c in numeric_cols]
+        + [
+            {
+                "name": c,
+                "type": "categorical",
+                "categories": None,
+                "default": str(X[c].mode().iloc[0]) if not X[c].mode().empty else None,
+            }
+            for c in categorical_cols
+        ]
     )
 
     # --- Step 4: One-hot encode, dropping one category per field to avoid
@@ -88,20 +97,63 @@ def preprocess(df: pd.DataFrame, target_column: str) -> Tuple[pd.DataFrame, pd.S
     return X, y, log
 
 
+def _numeric_field(name: str, series: pd.Series) -> dict:
+    """
+    Form field for a numeric column: the median as the pre-filled value, plus the
+    min/max seen in training (shown as a hint). Integer columns stay whole numbers.
+    """
+    is_int = pd.api.types.is_integer_dtype(series)
+
+    def tidy(value):
+        if pd.isna(value):
+            return None
+        return int(round(value)) if is_int else float(f"{float(value):.6g}")
+
+    return {
+        "name": name,
+        "type": "numeric",
+        "categories": None,
+        "default": tidy(series.median()),
+        "min": tidy(series.min()),
+        "max": tidy(series.max()),
+        "step": 1 if is_int else None,
+    }
+
+
 def apply_preprocessing_to_row(row: dict, preprocessing_log: dict) -> pd.DataFrame:
     """
     Takes a single raw input row (dict of feature_name -> value) and transforms it
     into the exact same shape/columns the model was trained on, using the saved log.
     """
+    defaults = {
+        field["name"]: field.get("default")
+        for field in preprocessing_log.get("raw_feature_columns", [])
+    }
+    imputation = preprocessing_log.get("imputation", {})
+
+    # Blank or missing fields get the typical training value instead of silently
+    # becoming 0 (models trained before defaults were recorded fall back to the
+    # imputation value, if that column had one)
+    row = dict(row)
+    for name, default in defaults.items():
+        value = row.get(name)
+        if value is None or (isinstance(value, str) and value.strip() == ""):
+            fallback = default if default is not None else imputation.get(name, {}).get("value")
+            if fallback is not None:
+                row[name] = fallback
+
     df = pd.DataFrame([row])
 
     encoding_log = preprocessing_log.get("encoding", {})
     categorical_columns = set(encoding_log.keys())
 
-    # Convert any column NOT marked as categorical to numeric
+    # Convert any column NOT marked as categorical to numeric; text that isn't a
+    # number also falls back to the typical value
     for col in df.columns:
         if col not in categorical_columns:
             df[col] = pd.to_numeric(df[col], errors="coerce")
+            if pd.isnull(df[col].iloc[0]) and defaults.get(col) is not None:
+                df[col] = defaults[col]
 
     # Apply the same imputation values recorded during training
     for col, info in preprocessing_log.get("imputation", {}).items():

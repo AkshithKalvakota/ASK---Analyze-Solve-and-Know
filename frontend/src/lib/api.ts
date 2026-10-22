@@ -4,6 +4,12 @@ export const api = axios.create({
   baseURL: import.meta.env.VITE_API_URL || 'http://127.0.0.1:8000',
 })
 
+// Fire-and-forget ping so the free Render backend starts waking up
+// while the visitor is still on the landing page / signing in
+export function wakeServer() {
+  api.get('/health').catch(() => {})
+}
+
 let getTokenFn: (() => Promise<string | null>) | null = null
 
 export function setTokenGetter(fn: () => Promise<string | null>) {
@@ -46,6 +52,7 @@ export interface Dataset {
   filename: string
   content_type: string
   profile_result?: {
+    columns?: string[] // file order; missing on datasets profiled before it was added
     dtypes: Record<string, string>
     quality_score: number
     n_rows: number
@@ -116,6 +123,11 @@ export interface InputField {
   name: string
   type: string
   categories?: string[] | null
+  // Typical training value and range; missing on models trained before they were added
+  default?: string | number | null
+  min?: number | null
+  max?: number | null
+  step?: number | null
 }
 
 export async function fetchInputSchema(

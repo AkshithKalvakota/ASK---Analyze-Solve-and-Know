@@ -109,11 +109,11 @@ def generate_plain_english_explanation(
         display_value = input_values.get(feature)
 
         direction = "increased" if impact > 0 else "decreased"
-        magnitude = abs(impact)
+        amount = _format_amount(abs(impact))
 
         if display_value is not None:
-            return f"{feature} = {display_value} {direction} the prediction by about {magnitude:,.0f}"
-        return f"{feature} {direction} the prediction by about {magnitude:,.0f}"
+            return f"{feature} = {display_value} {direction} the prediction by about {amount}"
+        return f"{feature} {direction} the prediction by about {amount}"
 
     half = max(1, top_n // 2)
     top_increases = increases[:half]
@@ -129,6 +129,18 @@ def generate_plain_english_explanation(
     result = sorted(top_increases + top_decreases, key=lambda c: abs(c["impact"]), reverse=True)
 
     return [to_sentence(c) for c in result]
+
+
+def _format_amount(value: float) -> str:
+    """
+    Whole numbers for big amounts (prices: "2,429,667"), one decimal for everyday
+    sizes (strength in MPa: "2.9"), two significant digits below 1 ("0.12").
+    """
+    if value >= 100:
+        return f"{value:,.0f}"
+    if value >= 1:
+        return f"{value:,.1f}"
+    return f"{value:.2g}"
 
 
 def _is_tree_model(model) -> bool:
