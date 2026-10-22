@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { Component, useEffect, useState, type ErrorInfo, type ReactNode } from 'react'
 import { isAxiosError } from 'axios'
 import { useAuth, UserButton } from '@clerk/clerk-react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
@@ -101,6 +101,31 @@ function checkTarget(column: string, profile: NonNullable<Dataset['profile_resul
   return null
 }
 
+// If one card fails to render (e.g. unexpected data from an old model), show a
+// message in its place instead of blanking the whole dashboard
+class CardErrorBoundary extends Component<{ children: ReactNode }, { failed: boolean }> {
+  state = { failed: false }
+
+  static getDerivedStateFromError() {
+    return { failed: true }
+  }
+
+  componentDidCatch(error: Error, info: ErrorInfo) {
+    console.error('Dashboard card failed to render', error, info.componentStack)
+  }
+
+  render() {
+    if (this.state.failed) {
+      return (
+        <p className="text-xs mt-3 rounded-md px-3 py-2 border text-[#E85D5D] bg-[#2A1418] border-[#E85D5D]/40">
+          Something went wrong showing this part of the page. Try “Rebuild my model”, or refresh the page.
+        </p>
+      )
+    }
+    return this.props.children
+  }
+}
+
 // Ticks once a second while `active`, for elapsed-time and slow-loading messages
 function useNow(active: boolean) {
   const [now, setNow] = useState(() => Date.now())
@@ -181,8 +206,10 @@ function MetricsDisplay({ metrics }: { metrics: Record<string, number> }) {
   )
 }
 
-function ModelSummary({ model, problemType, target }: { model: TrainedModel; problemType: string; target: string }) {
-  const isRegression = problemType === 'regression'
+function ModelSummary({ model, target }: { model: TrainedModel; target: string }) {
+  // Judge the model by its own scores, not the dataset's current target, which the
+  // user may have changed since building (R² is only saved for number models)
+  const isRegression = 'r2' in model.metrics
   const score = isRegression ? model.metrics.r2 : model.metrics.f1
   const rating = isRegression
     ? score >= 0.8 ? 'Very good' : score >= 0.6 ? 'Good' : score >= 0.4 ? 'Fair' : 'Weak'
@@ -615,13 +642,26 @@ function DatasetModels({
 
       {models && models.length > 0 && (
         <div className="mt-3 space-y-2">
-          {models.map((m) => (
-            <div key={m.id} className="bg-[#1A2436] border border-[#2A3550] rounded-lg p-4">
-              <ModelSummary model={m} problemType={dataset.problem_type ?? ''} target={target} />
-              <FeatureImportanceDisplay projectId={projectId} datasetId={dataset.id} modelId={m.id} />
-              <PredictionForm projectId={projectId} datasetId={dataset.id} modelId={m.id} target={target} metrics={m.metrics} />
-            </div>
-          ))}
+          {models.map((m) => {
+            // The latest model may predict an earlier target if the user has picked
+            // a different column since building it
+            const modelTarget = (m.target_column ?? dataset.target_column ?? '').trim()
+            const outdated = !!m.target_column && m.target_column !== dataset.target_column
+            return (
+              <CardErrorBoundary key={m.id}>
+                <div className="bg-[#1A2436] border border-[#2A3550] rounded-lg p-4">
+                  {outdated && (
+                    <p className="text-xs mb-3 rounded-md px-3 py-2 border text-[#E8B04B] bg-[#2A2414] border-[#E8B04B]/40">
+                      ⚠️ This model predicts <b>{modelTarget}</b>. You've since chosen <b>{target}</b>: press “Rebuild my model” to predict it.
+                    </p>
+                  )}
+                  <ModelSummary model={m} target={modelTarget} />
+                  <FeatureImportanceDisplay projectId={projectId} datasetId={dataset.id} modelId={m.id} />
+                  <PredictionForm projectId={projectId} datasetId={dataset.id} modelId={m.id} target={modelTarget} metrics={m.metrics} />
+                </div>
+              </CardErrorBoundary>
+            )
+          })}
         </div>
       )}
     </div>
@@ -953,7 +993,9 @@ export default function DashboardPage() {
                   Delete
                 </button>
               </div>
-              <ProjectDatasets projectId={project.id} />
+              <CardErrorBoundary>
+                <ProjectDatasets projectId={project.id} />
+              </CardErrorBoundary>
             </li>
           ))}
         </ul>

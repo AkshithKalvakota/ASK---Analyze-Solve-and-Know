@@ -9,6 +9,7 @@ class TrainedModelOut(BaseModel):
     model_name: str
     metrics: dict[str, Any]
     all_results: dict[str, Any]
+    target_column: str | None = None
     created_at: datetime
 
     class Config:

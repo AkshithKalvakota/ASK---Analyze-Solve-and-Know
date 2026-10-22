@@ -107,6 +107,7 @@ export interface TrainedModel {
   model_name: string
   metrics: Record<string, number>
   all_results: Record<string, Record<string, number>>
+  target_column?: string | null // what this model predicts (may differ from the dataset's current target)
   created_at: string
 }
 
