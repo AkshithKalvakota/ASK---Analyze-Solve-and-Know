@@ -1,0 +1,47 @@
+# Keeps the free Render backend awake during the day, when recruiters and
+# interviewers are likely to open the live site. Render puts free instances to
+# sleep after 15 minutes without traffic, and waking up can take over a minute.
+#
+# Daytime only, not 24/7: Render's free instance hours are shared by every free
+# service in the workspace (the RAG backend too). 08:33-23:23 IST is about
+# 470 hours a month, which leaves room for the other services.
+#
+# The 08:33 IST run is the daily health check: if the backend doesn't answer,
+# that run fails and GitHub emails the repository owner. The other runs only
+# warn, so an outage doesn't send an email every 10 minutes.
+name: Keep backend awake (daytime)
+
+on:
+  schedule:
+    # All times UTC (IST = UTC+5:30). Minute 3 instead of 0 because GitHub
+    # delays scheduled runs most at the top of the hour.
+    - cron: "3 3 * * *"            # 08:33 IST: daily health check
+    - cron: "13-59/10 3 * * *"     # 08:43-08:53 IST
+    - cron: "3-59/10 4-17 * * *"   # 09:33-23:23 IST, every 10 minutes
+  workflow_dispatch:               # allows running it by hand from the Actions tab
+
+concurrency:
+  group: keep-alive
+  cancel-in-progress: false
+
+jobs:
+  ping:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    steps:
+      - name: Call /health (retries while Render wakes up)
+        env:
+          STRICT: ${{ github.event_name == 'workflow_dispatch' || github.event.schedule == '3 3 * * *' }}
+        run: |
+          for attempt in 1 2 3 4; do
+            code=$(curl -s -o /dev/null -w "%{http_code}" --max-time 90 \
+              https://ask-backend-592n.onrender.com/health || true)
+            echo "Attempt $attempt: HTTP $code"
+            if [ "$code" = "200" ]; then exit 0; fi
+            sleep 20
+          done
+          if [ "$STRICT" = "true" ]; then
+            echo "::error::ASK backend did not answer /health. Check the Render dashboard (service suspended, failed deploy, or free hours used up?)."
+            exit 1
+          fi
+          echo "::warning::ASK backend did not answer /health on this run. The 08:33 IST check will fail and email you if it stays down."
