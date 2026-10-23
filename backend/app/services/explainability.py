@@ -106,7 +106,7 @@ def generate_plain_english_explanation(
     def to_sentence(c: dict) -> str:
         feature = c["feature"]
         impact = c["impact"]
-        display_value = input_values.get(feature)
+        display_value = _format_value(input_values.get(feature))
 
         direction = "increased" if impact > 0 else "decreased"
         amount = _format_amount(abs(impact))
@@ -129,6 +129,21 @@ def generate_plain_english_explanation(
     result = sorted(top_increases + top_decreases, key=lambda c: abs(c["impact"]), reverse=True)
 
     return [to_sentence(c) for c in result]
+
+
+def _format_value(value):
+    """
+    An input value as written in a sentence: 35069.37452 -> "35,069.37". Text stays
+    as it is, and numbers below 10,000 get no separator so years read as 2015.
+    """
+    try:
+        number = float(value)
+    except (TypeError, ValueError):
+        return value
+    if number.is_integer():
+        return f"{int(number):,}" if abs(number) >= 10000 else str(int(number))
+    text = f"{number:,.2f}" if abs(number) >= 10000 else f"{number:.2f}"
+    return text.rstrip("0").rstrip(".")
 
 
 def _format_amount(value: float) -> str:
