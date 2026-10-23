@@ -77,8 +77,8 @@ def train_model(
     if X.shape[1] == 0:
         raise HTTPException(
             status_code=400,
-            detail="There are no columns left to learn from. Tick at least one more column "
-                   "(text columns with more than 20 different values can't be used).",
+            detail="No usable columns left. Select more columns "
+                   "(text columns with more than 20 values are skipped).",
         )
 
     try:
@@ -248,7 +248,7 @@ def sample_row(
     # The sheet this model was trained on (older models predate sheet choice: first sheet)
     df = load_dataframe(download_file(dataset.storage_key), dataset.content_type, dataset.filename, log.get("sheet"))
     if target not in df.columns:
-        raise HTTPException(status_code=400, detail="This file no longer matches the model. Please rebuild the model.")
+        raise HTTPException(status_code=400, detail="The file no longer matches this model. Retrain it.")
 
     # Same preprocessing and split as train_and_select_best, so the row really was
     # hidden from the model (models trained before blank targets were dropped may

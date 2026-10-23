@@ -33,7 +33,7 @@ ALLOWED_TYPES = {
 }
 ALLOWED_EXTENSIONS = {".csv", ".xlsx", ".xls"}
 
-UNREADABLE_FILE = "We couldn't read this file. Please check it opens in Excel and is saved as .csv, .xlsx or .xls."
+UNREADABLE_FILE = "Couldn't read this file. Make sure it opens in Excel and is a .csv, .xlsx or .xls file."
 
 
 def dataset_sheet(dataset: Dataset) -> str | None:
@@ -73,7 +73,7 @@ def set_target_column(
         raise HTTPException(status_code=404, detail="Dataset not found")
 
     if not dataset.profile_result:
-        raise HTTPException(status_code=400, detail="Please check the data before choosing what to predict.")
+        raise HTTPException(status_code=400, detail="Run a data check before choosing a target.")
 
     if payload.target_column not in dataset.profile_result.get("dtypes", {}):
         raise HTTPException(status_code=400, detail="Column not found in dataset")
@@ -109,7 +109,7 @@ def upload_dataset(
     if extension not in ALLOWED_EXTENSIONS and file.content_type not in ALLOWED_TYPES:
         raise HTTPException(
             status_code=400,
-            detail="Please upload a spreadsheet saved as .csv, .xlsx or .xls.",
+            detail="Unsupported file type. Use a .csv, .xlsx or .xls file.",
         )
 
     file_bytes = file.file.read()

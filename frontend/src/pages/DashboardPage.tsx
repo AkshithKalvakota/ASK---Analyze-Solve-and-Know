@@ -81,22 +81,22 @@ function checkTarget(column: string, profile: NonNullable<Dataset['profile_resul
   const missing: number = profile.missing_by_column?.[column]?.missing_count ?? 0
 
   if (unique <= 1) {
-    return { level: 'block', message: 'Every row has the same value here, so there is nothing to predict. Choose another column.' }
+    return { level: 'block', message: 'Every row has the same value, so there is nothing to predict.' }
   }
   if (isText && unique > 20 && unique > rows / 2) {
     return {
       level: 'block',
-      message: `Almost every row has a different value (${unique.toLocaleString()} of ${rows.toLocaleString()}), like a name or an ID. A model can't learn categories from that. Choose another column.`,
+      message: `${unique.toLocaleString()} different values in ${rows.toLocaleString()} rows. This looks like a name or ID column and can't be predicted.`,
     }
   }
   if (/int/.test(dtype) && unique === rows) {
-    return { level: 'warn', message: 'Every row has a different whole number here. If this is an ID or a row number, the model will learn nothing useful.' }
+    return { level: 'warn', message: 'Every row has a different number. If this is an ID, pick another column.' }
   }
   if (isText && unique > 20) {
-    return { level: 'warn', message: `This column has ${unique} different values. Categories that appear only once or twice can't be learned, so building may fail.` }
+    return { level: 'warn', message: `${unique} categories. Ones that appear only once or twice can't be learned, so training may fail.` }
   }
   if (missing > 0) {
-    return { level: 'warn', message: `${missing.toLocaleString()} ${missing === 1 ? 'row has' : 'rows have'} no value in this column. ASK will leave ${missing === 1 ? 'it' : 'them'} out when building the model.` }
+    return { level: 'warn', message: `${missing.toLocaleString()} ${missing === 1 ? 'row is' : 'rows are'} empty in this column and will be skipped.` }
   }
   return null
 }
@@ -124,20 +124,20 @@ function reviewColumns(target: string, profile: NonNullable<Dataset['profile_res
     const r = targetCorrelation?.[col]
 
     if (unique !== undefined && unique <= 1) {
-      reviews[col] = { exclude: true, reason: 'Same value in every row, so it tells the model nothing' }
+      reviews[col] = { exclude: true, reason: 'Same value in every row' }
     } else if (unique !== undefined && unique === profile.n_rows && (isText || /int/.test(dtype))) {
-      reviews[col] = { exclude: true, reason: 'Looks like an ID or a name: every row is different' }
+      reviews[col] = { exclude: true, reason: 'Looks like an ID (every row is different)' }
     } else if (unique !== undefined && isText && unique > 20) {
-      reviews[col] = { exclude: true, reason: `${unique} different text values, too many to learn from (ASK would skip it anyway)` }
+      reviews[col] = { exclude: true, reason: `${unique} text values, too many to use` }
     } else if (typeof r === 'number' && Math.abs(r) >= 0.995) {
       reviews[col] = {
         exclude: true,
-        reason: `Moves exactly with ${name} (correlation ${r.toFixed(2)}), so it's probably calculated from it and would give the answer away`,
+        reason: `Matches ${name} almost exactly (correlation ${r.toFixed(2)}). Probably calculated from it.`,
       }
     } else if (typeof r === 'number' && Math.abs(r) >= 0.95) {
       reviews[col] = {
         exclude: false,
-        reason: `Very closely linked to ${name} (correlation ${r.toFixed(2)}). Fine if it's known before the ${name} is; untick it if it's worked out from the ${name}`,
+        reason: `Closely tied to ${name} (correlation ${r.toFixed(2)}). Keep it only if you'd know it before the ${name}.`,
       }
     }
   }
@@ -161,7 +161,7 @@ class CardErrorBoundary extends Component<{ children: ReactNode }, { failed: boo
     if (this.state.failed) {
       return (
         <p className="text-xs mt-3 rounded-md px-3 py-2 border text-[#E85D5D] bg-[#2A1418] border-[#E85D5D]/40">
-          Something went wrong showing this part of the page. Try “Rebuild my model”, or refresh the page.
+          Couldn't display this section. Try retraining the model or refreshing the page.
         </p>
       )
     }
@@ -203,7 +203,7 @@ function DataSummary({ profile }: { profile: NonNullable<Dataset['profile_result
     `${profile.n_columns} ${profile.n_columns === 1 ? 'column' : 'columns'}`,
     missingPct > 0 ? `${missingPct}% of cells empty` : 'no empty cells',
     duplicates > 0 ? `${duplicates} duplicate ${duplicates === 1 ? 'row' : 'rows'}` : 'no duplicate rows',
-    `${outliers.toLocaleString()} unusual ${outliers === 1 ? 'value' : 'values'}`,
+    `${outliers.toLocaleString()} ${outliers === 1 ? 'outlier' : 'outliers'}`,
   ]
 
   return (
@@ -262,46 +262,42 @@ function ModelSummary({ model, target }: { model: TrainedModel; target: string }
 
   return (
     <div>
-      <p className="text-[#E8B04B] font-semibold text-sm">🏆 Best method: {MODEL_NAMES[model.model_name] ?? model.model_name}</p>
+      <p className="text-[#E8B04B] font-semibold text-sm">Best model: {MODEL_NAMES[model.model_name] ?? model.model_name}</p>
       <div className="mt-3 bg-[#0B1220] border border-[#2A3550] rounded-lg p-3 text-sm space-y-1">
         {/* The rating and the winner both come from R² (numbers) or F1 (categories),
             never plain accuracy, which looks good on lopsided data even for a useless model */}
         <p>
-          Model quality: <span className="font-semibold text-[#4FD1C5]">{rating}</span>{' '}
-          <span className="text-xs text-[#8A93A6]">(based on {isRegression ? 'R² score' : 'F1 score'})</span>
+          Fit: <span className="font-semibold text-[#4FD1C5]">{rating}</span>{' '}
+          <span className="text-xs text-[#8A93A6]">
+            ({isRegression ? `R² ${model.metrics.r2.toFixed(2)}` : `F1 ${model.metrics.f1.toFixed(2)}`})
+          </span>
         </p>
         {isRegression ? (
           <>
             <p className="text-[#8A93A6]">
-              R² {model.metrics.r2.toFixed(2)}: explains about {Math.max(0, Math.round(model.metrics.r2 * 100))}% of the ups and downs in {target}.
+              Explains about {Math.max(0, Math.round(model.metrics.r2 * 100))}% of the variation in {target}.
             </p>
             <p className="text-[#8A93A6]">
-              Its guesses are usually off by about <span className="text-[#EDEEF2]">{formatAmount(model.metrics.mae)}</span>.
+              Average error: <span className="text-[#EDEEF2]">{formatAmount(model.metrics.mae)}</span>
             </p>
           </>
         ) : (
-          <p className="text-[#8A93A6]">
-            F1 {model.metrics.f1.toFixed(2)}: balances catching the real cases with avoiding false alarms, so it isn't
-            fooled when one {target} value is rare.
-          </p>
+          <p className="text-[#8A93A6]">F1 accounts for rare categories, unlike plain accuracy.</p>
         )}
         {score >= 0.99 && (
           <p className="text-xs text-[#E8B04B] pt-1">
-            ⚠️ Almost perfect scores are rare with real data. Check that no column is worked out from {target} itself
-            (open “Columns the model can learn from” above), or the model will fail on new data.
+            A near-perfect score usually means one of the columns gives the answer away. Check the columns used.
           </p>
         )}
       </div>
       <details className="mt-2">
         <summary className="text-[#8A93A6] text-xs cursor-pointer hover:text-[#EDEEF2]">Technical details</summary>
         <MetricsDisplay metrics={model.metrics} />
-        <p className="text-xs text-[#8A93A6] mt-3 mb-1">
-          We tried {tried.length} methods ({isRegression ? 'R² score' : 'F1 score'}, higher is better):
-        </p>
+        <p className="text-xs text-[#8A93A6] mt-3 mb-1">All models tried ({isRegression ? 'R²' : 'F1'}):</p>
         <ul className="text-xs space-y-0.5">
           {tried.map(([name, metrics]) => (
             <li key={name} className={name === model.model_name ? 'text-[#4FD1C5]' : 'text-[#8A93A6]'}>
-              {name === model.model_name ? '★' : '·'} {MODEL_NAMES[name] ?? name}: {(metrics[scoreKey] * 100).toFixed(1)}%
+              {MODEL_NAMES[name] ?? name}: {(metrics[scoreKey] * 100).toFixed(1)}%{name === model.model_name ? ' (selected)' : ''}
             </li>
           ))}
         </ul>
@@ -328,15 +324,14 @@ function FeatureImportanceDisplay({
     queryFn: () => fetchInputSchema(projectId, datasetId, modelId),
   })
 
-  if (isLoading) return <p className="text-xs text-[#8A93A6] mt-4">Working out what matters most...</p>
+  if (isLoading) return <p className="text-xs text-[#8A93A6] mt-4">Calculating feature importance...</p>
   if (!data || data.feature_importance.length === 0) return null
 
   const maxImportance = Math.max(...data.feature_importance.map((f) => f.importance))
 
   return (
     <div className="mt-5">
-      <SectionLabel>What matters most</SectionLabel>
-      <p className="text-xs text-[#8A93A6] -mt-1 mb-3">The inputs that change the prediction the most, biggest first.</p>
+      <SectionLabel>Most important inputs</SectionLabel>
       <div className="space-y-2">
         {data.feature_importance.slice(0, 8).map((f) => {
           const name = friendlyFeature(f.feature, schema?.fields)
@@ -371,33 +366,29 @@ function RealRowCheck({
 }) {
   let verdict: React.ReactNode
   if (actual === null) {
-    verdict = <p className="text-[#8A93A6]">Row {rowNumber} of your file has no real value to compare with.</p>
+    verdict = <p className="text-[#8A93A6]">Row {rowNumber} has no actual value to compare.</p>
   } else if (!isCategory && typeof actual === 'number' && typeof predicted === 'number') {
     const off = Math.abs(predicted - actual)
     const pct = actual !== 0 ? Math.round((off / Math.abs(actual)) * 100) : null
     verdict = (
-      <>
-        <p>
-          Real value in row {rowNumber} of your file: <span className="font-mono font-semibold text-[#EDEEF2]">{formatNumber(actual)}</span>
-        </p>
-        <p className="text-[#8A93A6] mt-0.5">The model was off by {formatAmount(off)}{pct !== null ? ` (${pct}%)` : ''}.</p>
-      </>
+      <p>
+        Actual (row {rowNumber}): <span className="font-mono font-semibold text-[#EDEEF2]">{formatNumber(actual)}</span>
+        <span className="text-[#8A93A6]"> · off by {formatAmount(off)}{pct !== null ? ` (${pct}%)` : ''}</span>
+      </p>
     )
   } else {
     const right = String(actual) === String(predicted)
     verdict = (
       <p>
-        Real value in row {rowNumber} of your file: <span className="font-semibold text-[#EDEEF2]">{String(actual)}</span>{' '}
-        <span className={right ? 'text-[#4FD1C5]' : 'text-[#E85D5D]'}>
-          {right ? '✓ The model got this one right.' : `✗ The model said ${String(predicted)}.`}
-        </span>
+        Actual (row {rowNumber}): <span className="font-semibold text-[#EDEEF2]">{String(actual)}</span>
+        <span className={right ? 'text-[#4FD1C5]' : 'text-[#E85D5D]'}> · {right ? 'correct' : 'incorrect'}</span>
       </p>
     )
   }
   return (
     <div className="mt-3 pt-3 border-t border-[#2A3550] text-xs text-left">
       {verdict}
-      <p className="text-[10px] text-[#8A93A6] mt-1">This row was hidden from the model while it learned, so it's a fair test.</p>
+      <p className="text-[10px] text-[#8A93A6] mt-1">From the test set. The model didn't see this row during training.</p>
     </div>
   )
 }
@@ -494,13 +485,13 @@ function PredictionForm({
 
   return (
     <form onSubmit={handleSubmit} className="mt-5 bg-[#0B1220] border border-[#2A3550] rounded-lg p-4">
-      <SectionLabel>{result === null ? 'Try a prediction' : 'What if…?'}</SectionLabel>
+      <SectionLabel>{result === null ? 'Predict' : 'What-if'}</SectionLabel>
       <p className="text-xs text-[#8A93A6] -mt-1 mb-4">
         {result !== null
-          ? 'Change any value and press Update to see how the prediction moves.'
+          ? 'Change any input and update to compare.'
           : prefilled
-            ? `Each box starts at a typical value from your data. Change what you like, then press Predict ${target}.`
-            : `Fill in every box, then press Predict ${target}. (Rebuild the model to get boxes pre-filled with typical values.)`}
+            ? 'Fields start at typical values from your data.'
+            : 'Fill in all fields. Retrain the model to get typical values filled in.'}
       </p>
       <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
         {schema.fields.map((field) => {
@@ -534,7 +525,7 @@ function PredictionForm({
                   />
                   {field.min != null && field.max != null && (
                     <p className="text-[10px] text-[#8A93A6] mt-1">
-                      Usually {formatNumber(field.min)}–{formatNumber(field.max)}
+                      Range: {formatNumber(field.min)}–{formatNumber(field.max)}
                     </p>
                   )}
                 </>
@@ -549,7 +540,7 @@ function PredictionForm({
           disabled={predictMutation.isPending}
           className="text-sm font-semibold bg-[#E8B04B] text-[#0B1220] hover:brightness-110 px-5 py-2.5 rounded-md disabled:opacity-50 transition"
         >
-          {predictMutation.isPending ? 'Predicting...' : result === null ? `Predict ${target}` : 'Update prediction'}
+          {predictMutation.isPending ? 'Predicting...' : result === null ? 'Predict' : 'Update'}
         </button>
         <button
           type="button"
@@ -557,18 +548,18 @@ function PredictionForm({
           disabled={sampleRowMutation.isPending || predictMutation.isPending}
           className="text-sm bg-[#121A2B] border-2 border-[#4FD1C5]/50 hover:border-[#4FD1C5] text-[#EDEEF2] px-4 py-2 rounded-md transition disabled:opacity-50"
         >
-          {sampleRowMutation.isPending ? 'Picking a row...' : '🎲 Try a real row from my data'}
+          {sampleRowMutation.isPending ? 'Loading row...' : 'Use a real row'}
         </button>
       </div>
 
       {predictMutation.isError && (
         <p className="text-[#E85D5D] text-xs mt-2">
-          {errorMessage(predictMutation.error, 'Prediction failed. Please check the values and try again.')}
+          {errorMessage(predictMutation.error, 'Prediction failed. Check the values and try again.')}
         </p>
       )}
       {sampleRowMutation.isError && (
         <p className="text-[#E85D5D] text-xs mt-2">
-          {errorMessage(sampleRowMutation.error, "Couldn't pick a row from your file. Please try again.")}
+          {errorMessage(sampleRowMutation.error, "Couldn't load a row. Try again.")}
         </p>
       )}
 
@@ -587,15 +578,15 @@ function PredictionForm({
           )}
           {numericChange !== null && (
             <p className={`text-xs mt-1 ${numericChange > 0 ? 'text-[#4FD1C5]' : 'text-[#E85D5D]'}`}>
-              {numericChange > 0 ? '▲' : '▼'} {formatNumber(Math.abs(numericChange))} {numericChange > 0 ? 'higher' : 'lower'} than before
+              {numericChange > 0 ? '+' : '−'}{formatNumber(Math.abs(numericChange))} vs. previous
             </p>
           )}
           <p className="text-[10px] text-[#8A93A6] mt-1 tracking-wide uppercase">Predicted {target}</p>
           {typeof result === 'number' && typicalMiss != null && largeMiss != null && (
             <p className="text-xs text-[#8A93A6] mt-2">
-              Likely between {formatAmount(result - typicalMiss)} and {formatAmount(result + typicalMiss)}.
+              Likely range: {formatAmount(result - typicalMiss)} to {formatAmount(result + typicalMiss)}
               <span className="block text-[10px] mt-0.5">
-                Half of the model's test predictions were this close; 9 in 10 were within ±{formatAmount(largeMiss)}.
+                Based on test errors: half within ±{formatAmount(typicalMiss)}, 90% within ±{formatAmount(largeMiss)}
               </span>
             </p>
           )}
@@ -623,10 +614,10 @@ function PredictionForm({
           </ul>
           <details className="mt-2">
             <summary className="text-[#8A93A6] text-xs cursor-pointer hover:text-[#EDEEF2]">
-              Show the maths
+              Show calculation
             </summary>
             <p className="text-[#8A93A6] text-xs mt-1 font-mono">
-              average ({formatNumber(explanation.base_value)}) + each input's effect ≈ {formatNumber(explanation.sum_check)} (prediction: {formatPrediction(result!)})
+              base value {formatNumber(explanation.base_value)} + input effects = {formatNumber(explanation.sum_check)} (prediction {formatPrediction(result!)})
             </p>
           </details>
         </div>
@@ -698,12 +689,10 @@ function DatasetModels({
       {featureColumns.length > 0 && (
         <details open={!models?.length} className="mb-3 bg-[#121A2B] border border-[#2A3550] rounded-md px-3 py-2">
           <summary className="text-xs text-[#EDEEF2] cursor-pointer">
-            Columns the model can learn from: {usedCount} of {featureColumns.length}
-            {excluded.length > 0 && <span className="text-[#8A93A6]"> · {excluded.length} left out</span>}
+            Columns used: {usedCount} of {featureColumns.length}
           </summary>
           <p className="text-[10px] text-[#8A93A6] mt-2">
-            Untick anything the model shouldn't see: IDs, names, or anything worked out from the answer
-            itself. ASK has already unticked the obvious ones and added notes to others worth a look.
+            Leave out IDs, names and anything calculated from the target. Risky columns are already unticked.
           </p>
           <div className="mt-2 grid sm:grid-cols-2 gap-x-4 gap-y-1.5">
             {featureColumns.map((col) => (
@@ -718,7 +707,6 @@ function DatasetModels({
                   <span className="text-[#EDEEF2]">{col}</span>
                   {reviews[col] && (
                     <span className={`block text-[10px] ${reviews[col].exclude ? 'text-[#E8B04B]' : 'text-[#8A93A6]'}`}>
-                      {reviews[col].exclude ? '' : 'Note: '}
                       {reviews[col].reason}
                     </span>
                   )}
@@ -734,24 +722,21 @@ function DatasetModels({
         disabled={trainMutation.isPending || blocked || usedCount === 0}
         className="text-sm font-semibold bg-[#4FD1C5] text-[#0B1220] hover:brightness-110 px-4 py-2 rounded-md transition disabled:opacity-50"
       >
-        {trainMutation.isPending ? `Building your model... ${elapsed}s` : models?.length ? 'Rebuild my model' : 'Build my model'}
+        {trainMutation.isPending ? `Training... ${elapsed}s` : models?.length ? 'Retrain' : 'Train model'}
       </button>
       {trainMutation.isPending && (
-        <p className="text-xs text-[#8A93A6] mt-1">Cleaning the data, trying 3 methods and keeping the best. Usually 5–30 seconds.</p>
+        <p className="text-xs text-[#8A93A6] mt-1">Comparing 3 models. Usually takes 5–30 seconds.</p>
       )}
       {!trainMutation.isPending && usedCount === 0 && (
-        <p className="text-xs text-[#E85D5D] mt-1">Tick at least one column for the model to learn from.</p>
-      )}
-      {!trainMutation.isPending && !models?.length && !blocked && usedCount > 0 && (
-        <p className="text-xs text-[#8A93A6] mt-1">Next: build a model that predicts {target}.</p>
+        <p className="text-xs text-[#E85D5D] mt-1">Select at least one column.</p>
       )}
       {!trainMutation.isPending && columnsChanged && (
-        <p className="text-xs text-[#E8B04B] mt-1">You changed the columns. Press “Rebuild my model” to use them.</p>
+        <p className="text-xs text-[#E8B04B] mt-1">Columns changed. Retrain to apply.</p>
       )}
 
       {trainMutation.isError && (
         <p className="text-[#E85D5D] text-xs mt-1">
-          {errorMessage(trainMutation.error, 'Building the model failed. Please try again.')}
+          {errorMessage(trainMutation.error, 'Training failed. Try again.')}
         </p>
       )}
 
@@ -767,7 +752,7 @@ function DatasetModels({
                 <div className="bg-[#1A2436] border border-[#2A3550] rounded-lg p-4">
                   {outdated && (
                     <p className="text-xs mb-3 rounded-md px-3 py-2 border text-[#E8B04B] bg-[#2A2414] border-[#E8B04B]/40">
-                      ⚠️ This model predicts <b>{modelTarget}</b>. You've since chosen <b>{target}</b>: press “Rebuild my model” to predict it.
+                      This model was trained to predict <b>{modelTarget}</b>. Retrain to predict <b>{target}</b>.
                     </p>
                   )}
                   <ModelSummary model={m} target={modelTarget} />
@@ -834,9 +819,9 @@ function ProjectDatasets({ projectId }: { projectId: string }) {
     <div className="mt-4 pt-4 border-t border-[#2A3550]">
       <label className="inline-flex items-center gap-3 flex-wrap">
         <span className="text-sm font-semibold bg-[#121A2B] border-2 border-[#4FD1C5]/50 hover:border-[#4FD1C5] hover:bg-[#1A2436] text-[#EDEEF2] px-6 py-3 rounded-lg cursor-pointer transition inline-block">
-          {uploadMutation.isPending ? 'Uploading...' : '📤 Upload a spreadsheet'}
+          {uploadMutation.isPending ? 'Uploading...' : 'Upload file'}
         </span>
-        <span className="text-xs text-[#8A93A6]">CSV or Excel (.csv, .xlsx, .xls)</span>
+        <span className="text-xs text-[#8A93A6]">CSV, XLSX or XLS</span>
         <input
           type="file"
           accept=".csv,.xls,.xlsx"
@@ -848,7 +833,7 @@ function ProjectDatasets({ projectId }: { projectId: string }) {
 
       {uploadMutation.isError && (
         <p className="text-[#E85D5D] text-sm mt-2">
-          {errorMessage(uploadMutation.error, 'Upload failed. Please use a spreadsheet saved as .csv, .xlsx or .xls.')}
+          {errorMessage(uploadMutation.error, 'Upload failed. Use a .csv, .xlsx or .xls file.')}
         </p>
       )}
 
@@ -869,14 +854,14 @@ function ProjectDatasets({ projectId }: { projectId: string }) {
             return (
               <li key={d.id} className="bg-[#0B1220] border border-[#2A3550] rounded-lg p-4 hover:border-[#4FD1C5]/40 transition-colors">
                 <div className="flex items-center justify-between gap-2">
-                  <span className="text-sm text-[#EDEEF2] truncate">📄 {d.filename}</span>
+                  <span className="text-sm text-[#EDEEF2] truncate">{d.filename}</span>
                   <div className="flex gap-2 shrink-0">
                     <button
                       onClick={() => profileMutation.mutate({ datasetId: d.id })}
                       disabled={checking}
                       className="text-xs bg-[#121A2B] border border-[#2A3550] hover:border-[#4FD1C5] text-[#EDEEF2] px-3 py-1.5 rounded transition"
                     >
-                      {checking ? 'Checking...' : d.profile_result ? 'Re-check data' : 'Check my data'}
+                      {checking ? 'Checking...' : d.profile_result ? 'Re-check' : 'Check data'}
                     </button>
                     <button
                       onClick={() => {
@@ -892,14 +877,14 @@ function ProjectDatasets({ projectId }: { projectId: string }) {
                   </div>
                 </div>
 
-                {checking && <p className="text-xs text-[#8A93A6] mt-3">Checking your data for gaps, duplicates and unusual values...</p>}
+                {checking && <p className="text-xs text-[#8A93A6] mt-3">Checking for missing values, duplicates and outliers...</p>}
                 {checkFailed && (
                   <p className="text-[#E85D5D] text-xs mt-3">
-                    {errorMessage(profileMutation.error, "We couldn't check this file. Please try again.")}
+                    {errorMessage(profileMutation.error, "Couldn't check this file. Try again.")}
                   </p>
                 )}
                 {!checking && !checkFailed && !d.profile_result && (
-                  <p className="text-xs text-[#8A93A6] mt-3">Next: check your data so ASK can see what's inside.</p>
+                  <p className="text-xs text-[#8A93A6] mt-3">Run a data check to continue.</p>
                 )}
 
                 {d.profile_result && <DataSummary profile={d.profile_result} />}
@@ -907,7 +892,7 @@ function ProjectDatasets({ projectId }: { projectId: string }) {
                 {sheets.length > 1 && (
                   <div className="mt-3">
                     <label htmlFor={`${d.id}-sheet`} className="block text-xs text-[#8A93A6] mb-1">
-                      This workbook has {sheets.length} sheets. Which one holds your data?
+                      Sheet
                     </label>
                     <select
                       id={`${d.id}-sheet`}
@@ -920,14 +905,16 @@ function ProjectDatasets({ projectId }: { projectId: string }) {
                         <option key={name} value={name}>{name}</option>
                       ))}
                     </select>
-                    <p className="text-[10px] text-[#8A93A6] mt-1">Switching sheets checks the data again and clears the column to predict.</p>
+                    <p className="text-[10px] text-[#8A93A6] mt-1">
+                      This file has {sheets.length} sheets. Changing it re-checks the data and resets the target.
+                    </p>
                   </div>
                 )}
 
                 {d.profile_result && (
                   <div className="mt-4">
                     <label htmlFor={selectId} className="block text-xs text-[#8A93A6] mb-1">
-                      What do you want to predict?
+                      Column to predict
                     </label>
                     <div className="flex items-center gap-2 flex-wrap">
                       <select
@@ -937,24 +924,24 @@ function ProjectDatasets({ projectId }: { projectId: string }) {
                         onChange={(e) => targetMutation.mutate({ datasetId: d.id, column: e.target.value })}
                         className="bg-[#121A2B] border-2 border-[#4FD1C5]/40 rounded-md px-3 py-2 text-sm text-[#EDEEF2] focus:border-[#4FD1C5] transition"
                       >
-                        <option value="" disabled>Choose a column</option>
+                        <option value="" disabled>Select a column</option>
                         {columns.map((col) => (
                           <option key={col} value={col}>
                             {col}
-                            {checkTarget(col, d.profile_result!)?.level === 'block' ? " (can't be predicted)" : ''}
+                            {checkTarget(col, d.profile_result!)?.level === 'block' ? ' (not usable)' : ''}
                           </option>
                         ))}
                       </select>
-                      {settingTarget && <span className="text-xs text-[#8A93A6]">Looking at this column...</span>}
+                      {settingTarget && <span className="text-xs text-[#8A93A6]">Checking column...</span>}
                       {!settingTarget && d.problem_type && (
                         <span className="text-xs bg-[#1A2436] border border-[#4FD1C5]/30 text-[#4FD1C5] px-2.5 py-1.5 rounded">
-                          {d.problem_type === 'regression' ? 'Predicting a number' : 'Predicting a category'}
+                          {d.problem_type === 'regression' ? 'Number' : 'Category'}
                         </span>
                       )}
                     </div>
                     {targetFailed && (
                       <p className="text-[#E85D5D] text-xs mt-1">
-                        {errorMessage(targetMutation.error, "Couldn't use that column. Please try another one.")}
+                        {errorMessage(targetMutation.error, "Couldn't use that column. Try another.")}
                       </p>
                     )}
                     {!settingTarget && targetCheck && (
@@ -965,7 +952,6 @@ function ProjectDatasets({ projectId }: { projectId: string }) {
                             : 'text-[#E8B04B] bg-[#2A2414] border-[#E8B04B]/40'
                         }`}
                       >
-                        {targetCheck.level === 'block' ? '⛔ ' : '⚠️ '}
                         {targetCheck.message}
                       </p>
                     )}
@@ -1021,21 +1007,21 @@ export default function DashboardPage() {
   const [sampleStep, setSampleStep] = useState<string | null>(null)
   const sampleMutation = useMutation({
     mutationFn: async () => {
-      setSampleStep('Creating a sample project...')
+      setSampleStep('Creating project...')
       const project = await createProject('Sample: insurance charges')
       queryClient.invalidateQueries({ queryKey: ['projects'] })
 
-      setSampleStep('Uploading insurance.csv (1,338 people)...')
+      setSampleStep('Uploading insurance.csv...')
       const response = await fetch('/samples/insurance.csv')
       if (!response.ok) throw new Error('Sample file missing')
       const file = new File([await response.blob()], 'insurance.csv', { type: 'text/csv' })
       const dataset = await uploadDataset(project.id, file)
 
-      setSampleStep('Checking the data...')
+      setSampleStep('Checking data...')
       await profileDataset(project.id, dataset.id)
-      setSampleStep('Choosing what to predict: charges...')
+      setSampleStep('Setting target to charges...')
       await setTargetColumn(project.id, dataset.id, 'charges')
-      setSampleStep('Building the model (trying 3 methods, about 10 seconds)...')
+      setSampleStep('Training models...')
       await trainModel(project.id, dataset.id)
       return { project, dataset }
     },
@@ -1053,7 +1039,7 @@ export default function DashboardPage() {
   }
 
   function handleDeleteProject(project: Project) {
-    if (confirm(`Delete the project "${project.name}" and all its files and models? This cannot be undone.`)) {
+    if (confirm(`Delete "${project.name}"? Its files and models will be deleted too.`)) {
       deleteMutation.mutate(project.id)
     }
   }
@@ -1076,7 +1062,7 @@ export default function DashboardPage() {
             type="text"
             value={newProjectName}
             onChange={(e) => setNewProjectName(e.target.value)}
-            placeholder="Name a new project, e.g. House prices"
+            placeholder="New project name"
             className="flex-1 bg-[#121A2B] border-2 border-[#2A3550] rounded-md px-4 py-2.5 text-[#EDEEF2] placeholder:text-[#8A93A6] focus:border-[#4FD1C5] transition"
           />
           <button
@@ -1094,14 +1080,14 @@ export default function DashboardPage() {
             disabled={sampleMutation.isPending}
             className="text-sm font-semibold text-[#4FD1C5] hover:underline disabled:opacity-60 disabled:no-underline"
           >
-            ✨ Try it with sample data
+            Try with sample data
           </button>
           <span className="text-xs text-[#8A93A6]">
-            {sampleStep ?? 'Loads 1,338 insurance records and builds a model that predicts medical charges.'}
+            {sampleStep ?? 'Insurance data, 1,338 rows. Predicts medical charges.'}
           </span>
           {sampleMutation.isError && (
             <p className="basis-full text-xs text-[#E85D5D]">
-              {errorMessage(sampleMutation.error, "The sample didn't finish. Please try again.")}
+              {errorMessage(sampleMutation.error, "Couldn't load the sample. Try again.")}
             </p>
           )}
         </div>
@@ -1110,13 +1096,11 @@ export default function DashboardPage() {
           <div className="text-[#8A93A6]">
             <p>Loading projects...</p>
             {slowStart && (
-              <p className="text-sm mt-1">
-                Waking up the server. After a quiet spell the first visit can take up to a minute. Thanks for waiting!
-              </p>
+              <p className="text-sm mt-1">The server is starting up. This can take up to a minute.</p>
             )}
           </div>
         )}
-        {error && <p className="text-[#E85D5D]">Couldn't reach the server. Please refresh the page in a minute.</p>}
+        {error && <p className="text-[#E85D5D]">Can't reach the server right now. Refresh in a minute.</p>}
 
         <ul className="space-y-4">
           {projects?.map((project) => (
@@ -1141,15 +1125,15 @@ export default function DashboardPage() {
         {projects?.length === 0 && (
           <div className="text-center mt-12 text-[#8A93A6]">
             <p>No projects yet.</p>
-            <p className="text-sm mt-1">Give your first project a name above, then upload a spreadsheet to get started.</p>
-            <p className="text-sm mt-4">New here? See the whole thing work in about 20 seconds:</p>
+            <p className="text-sm mt-1">Create a project above, then upload a CSV or Excel file.</p>
+            <p className="text-sm mt-4">Or start with sample data:</p>
             <button
               type="button"
               onClick={() => sampleMutation.mutate()}
               disabled={sampleMutation.isPending}
               className="mt-2 bg-[#E8B04B] text-[#0B1220] font-semibold px-5 py-2.5 rounded-md hover:brightness-110 transition disabled:opacity-50"
             >
-              {sampleMutation.isPending ? 'Setting up the sample...' : '✨ Try it with sample data'}
+              {sampleMutation.isPending ? 'Loading sample...' : 'Try with sample data'}
             </button>
           </div>
         )}
